@@ -3,6 +3,7 @@
  */
 import type { ResultSetHeader } from 'mysql2/promise';
 import { and, eq, sql } from 'drizzle-orm';
+import type { CreateUserWithKeyParams } from '../user-with-key-types';
 import type { InsertUserAuditLogParams } from '../user-audit-logs-types';
 import type { InsertUserBudgetAuditLogParams } from '../user-budget-audit-params';
 import type { InsertKeyParams } from '../api-keys-types';
@@ -66,6 +67,26 @@ export async function getSystemConfigValueMy(client: MySqlDatabaseClient, key: s
 		.where(eq(mySystemConfigTable.key, key))
 		.limit(1);
 	return row[0]?.value ?? null;
+}
+
+/** A duplicate external identity aborts the transaction, including the key and audits. */
+export async function createUserWithKeyMy(client: MySqlDatabaseClient, params: CreateUserWithKeyParams): Promise<void> {
+	const u = params.user;
+	const now = nowIso();
+	await client.drizzle.transaction(async (tx) => {
+		await tx.insert(myUsersTable).values({
+			id: u.id, email: u.email, externalSystem: u.external_system, externalUserId: u.external_user_id,
+			budgetMax: u.budget_max == null ? null : String(u.budget_max), budgetBase: String(u.budget_base),
+			budgetSpent: String(u.budget_spent), budgetPeriod: u.budget_period, budgetResetAt: u.budget_reset_at,
+			walletGranted: String(u.wallet_granted), walletSpent: String(u.wallet_spent),
+			status: u.status, metadata: u.metadata, chargedCostFactors: u.charged_cost_factors,
+			rateLimit: u.rate_limit == null ? null : JSON.stringify(u.rate_limit), createdAt: now, updatedAt: now,
+		});
+		await tx.insert(myApiKeysTable).values({ ...params.key, createdAt: now, updatedAt: now });
+		for (const audit of params.audits) {
+			await tx.insert(myUserAuditLogsTable).values(toUserAuditLogDrizzleInsert(audit, now));
+		}
+	});
 }
 
 export async function createApiKeyWithAuditMy(

@@ -27,6 +27,8 @@ import type { DashScopeRealtimeNodeDispatch } from './services/egress/dashscope-
 
 /** Cloudflare Worker bindings：D1 `DB`。Postgres 见 `src/runtime/node.ts`。 */
 export type GatewayBindings = {
+	/** Optional JSON external access-token verification policy. */
+	JWT_AUTH_CONFIG?: string;
 	DB?: D1Database;
 	/** 可选；仅允许 `d1` 或省略。 */
 	DATABASE_DRIVER?: string;

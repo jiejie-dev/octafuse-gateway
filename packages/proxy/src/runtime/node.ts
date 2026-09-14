@@ -32,7 +32,12 @@ async function resolveNodeStorage(): Promise<StorageContext> {
 }
 
 export function createNodeApp() {
-	return createProxyApp(async () => resolveNodeStorage());
+	return createProxyApp(async () => resolveNodeStorage(), {
+		beforeAll: (c, next) => {
+			c.env = { ...c.env, JWT_AUTH_CONFIG: process.env.JWT_AUTH_CONFIG };
+			return next();
+		},
+	});
 }
 
 function redactDatabaseConnectionUrl(connectionString: string): string {

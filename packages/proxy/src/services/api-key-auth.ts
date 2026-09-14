@@ -2,7 +2,7 @@
  * 用户密钥鉴权：校验 Bearer sk-，并在读库时触发与 `user-service.maybeResetBudget` 一致的预算周期重置写回。
  */
 import { persistLazyBudgetResetIfNeeded, resolveMeMetadata, roundGatewayMoney } from '@octafuse/core';
-import type { ApiKeyRateLimit, GatewayRepositories } from '@octafuse/core';
+import type { ApiKeyRateLimit, GatewayRepositories, ResolvedGatewayKeyRow } from '@octafuse/core';
 
 /** 鉴权成功后注入上下文（与中间件 `ApiKeyContext` 字段对应）。 */
 export type AuthenticatedApiKey = {
@@ -38,7 +38,14 @@ export type AuthenticatedApiKey = {
 export async function authenticateApiKey(repos: GatewayRepositories, key: string): Promise<AuthenticatedApiKey | null> {
 	const row = await repos.apiKeys.getApiKeyWithUserByKey(key);
 	if (!row) return null;
+	return resolveAuthenticatedKey(repos, row);
+}
 
+/** Shared budget reset and accounting context for API Key and verified JWT identities. */
+export async function resolveAuthenticatedKey(
+	repos: GatewayRepositories,
+	row: ResolvedGatewayKeyRow,
+): Promise<AuthenticatedApiKey> {
 	let budgetSpent = row.budget_spent;
 	let budgetResetAt = row.budget_reset_at;
 	let budgetMax = row.budget_max != null ? roundGatewayMoney(Number(row.budget_max)) : null;
