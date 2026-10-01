@@ -42,6 +42,24 @@ export type ApiKeyContext = {
 };
 
 /**
+ * Canonical `/v1/messages`, plus temporary SoloEnt Agent aliases.
+ *
+ * TEMP(soloent): `/messages` and `/v1/v1/messages` exist only so old SoloEnt
+ * clients can authenticate with `x-api-key`. Remove those two branches together
+ * with the alias routes in `app.ts` once SoloEnt Agent 0.17.x and 0.18.0–0.18.5
+ * are gone and their plugin JWTs (30 days) have expired. Keep `/v1/messages`.
+ */
+export function isAnthropicMessagesPath(path: string): boolean {
+  return (
+    path.startsWith('/v1/messages') ||
+    path === '/messages' ||
+    path.startsWith('/messages/') ||
+    path === '/v1/v1/messages' ||
+    path.startsWith('/v1/v1/messages/')
+  );
+}
+
+/**
  * 按路径兼容多 SDK：`Authorization: Bearer`、Anthropic `x-api-key`、Gemini 查询参数 `key` 或 `x-goog-api-key`。
  * @returns 明文 sk 或 null
  */
@@ -62,8 +80,8 @@ function extractApiKey(c: { req: { header: (name: string) => string | undefined;
 
   const path = c.req.path;
 
-  // Anthropic SDK commonly sends x-api-key.
-  if (path.startsWith('/v1/messages')) {
+  // Anthropic SDK commonly sends x-api-key. Also cover legacy SoloEnt Agent paths.
+  if (isAnthropicMessagesPath(path)) {
     const anthropicKey = c.req.header('x-api-key')?.trim() ?? '';
     if (anthropicKey) {
       return anthropicKey;
@@ -140,7 +158,9 @@ export const requireApiKey = createMiddleware<Env>(async (c, next) => {
 
   // Allow GET /v1/me even when budget is 0 or rate-limited, so clients can show key / budget state
   const isKeyInfoRoute = c.req.method === 'GET' && c.req.path.endsWith('/me');
-  if (!isKeyInfoRoute) {
+  // Allow GET /v1/models even when budget is exceeded or rate-limited (list only; Agent refreshes ~60s)
+  const isModelsRoute = c.req.method === 'GET' && c.req.path.endsWith('/models');
+  if (!isKeyInfoRoute && !isModelsRoute) {
     const { exceeded, retryAfterSeconds } = await consumeRateLimitLayers([
       { subject: keyRateLimitSubject(authResult.keyId), rpm: rateLimitRpmOf(authResult.rateLimit) },
       { subject: userRateLimitSubject(authResult.userId), rpm: rateLimitRpmOf(authResult.userRateLimit) },
@@ -155,8 +175,6 @@ export const requireApiKey = createMiddleware<Env>(async (c, next) => {
     }
   }
 
-  // Allow GET /v1/models even when budget is exceeded (just lists available models, no resource consumption)
-  const isModelsRoute = c.req.method === 'GET' && c.req.path.endsWith('/models');
   // Budget check for chat / images / audio is done in route after resolving model (and pre-estimate)
   const isChatRoute = c.req.method === 'POST' && c.req.path.endsWith('/chat/completions');
   const isImagesRoute =

@@ -1,12 +1,11 @@
 'use client';
 
-import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useMemo, useState, type KeyboardEvent } from 'react';
 import {
 	ArrowDownIcon,
 	ArrowLongRightIcon,
 	ChevronDownIcon,
 	ClipboardDocumentIcon,
-	ClockIcon,
 	ExclamationTriangleIcon,
 	PencilSquareIcon,
 	PlusIcon,
@@ -18,29 +17,18 @@ import {
 	isAudioSpeechModel,
 	isImageGenerationModel,
 } from '@octafuse/core/db/model-modalities';
-import type { SharedScheduleWindow } from '@octafuse/core/db/pricing-schedule';
-import { useTranslations } from 'next-intl';
+import { providerKindDisplayLabel, routeProviderAccountLabel } from '@/lib/provider-kind';
+import { useLocale, useTranslations } from 'next-intl';
+import { InfoHintPopover } from '@/components/InfoHintPopover';
 import { UpstreamProtocolBrandIcon } from '@/components/upstream-brand-logo';
 import { formatCompactTokens } from '@/lib/format-compact-tokens';
-import {
-	parseChargedFactorFromPriceOverride,
-	parseMeteredFactorFromPriceOverride,
-} from '@/lib/pricing-ui';
 import type { GatewayModel, GatewayProvider } from '@/lib/types';
 import { tagBadgeClass } from '../../models/model-utils';
 import { useStickySummary } from '../sticky-summary-store';
 import type { RouteModelGroup, RequestSurfaceGroup } from '../route-utils';
 import {
 	compareRoutesWithinPriorityLayer,
-	factorChipClassForValue,
-	factorLevelForValue,
-	formatFactorMultiplier,
-	formatFactorMultiplierForChip,
-	formatScheduleRange,
-	formatSharedScheduleWindowsHint,
-	resolveRouteScheduleDisplay,
 	groupSectionsByRequestSurface,
-	hasBasePricingInversion,
 	parseModelTagsList,
 	protocolBadgeClass,
 	requestSurfacePath,
@@ -49,13 +37,14 @@ import {
 	splitRoutesByProtocolAndRouteGroup,
 } from '../route-utils';
 import {
-	FACTOR_CHIP_BASE,
 	type RouteFlowDensity,
 	type RouteListRow,
 	type RouteProtocolGroupSection,
 } from '../types';
 import { FailoverRulesDialog } from './failover-rules-dialog';
 import { ProviderStickyChip } from './provider-sticky-chip';
+import { RouteStickyUsage } from './route-sticky-usage';
+import { RouteTargetPricing } from './route-target-pricing';
 
 const EMPTY_STICKY_COUNTS = new Map<string, number>();
 
@@ -73,7 +62,9 @@ type PriorityTierSummary = {
 
 function summarizePriorityTier(
 	routes: RouteListRow[],
-	providerMeta: Map<string, GatewayProvider>
+	providerMeta: Map<string, GatewayProvider>,
+	locale: string,
+	customLabel: string,
 ): PriorityTierSummary {
 	let activeCount = 0;
 	const previewItems: PriorityTierPreviewItem[] = [];
@@ -84,7 +75,7 @@ function summarizePriorityTier(
 		const provider = providerMeta.get(route.provider_id);
 		previewItems.push({
 			id: route.id,
-			name: route.provider_name || provider?.name || route.provider_id,
+			name: routeProviderAccountLabel(route, provider, locale, customLabel),
 			enabled,
 		});
 	}
@@ -138,241 +129,120 @@ type Props = {
 	onOpenProviderStickyDialog: OpenProviderStickyDialog;
 };
 
-function ScheduleFactorChip({ label, factor }: { label?: string; factor: number }) {
-	return (
-		<span className="inline-flex whitespace-nowrap rounded bg-white/80 px-1 py-px text-[10px] font-semibold tabular-nums text-sky-800 ring-1 ring-inset ring-sky-200/80">
-			{label ? `${label} ${formatFactorMultiplier(factor)}` : formatFactorMultiplier(factor)}
-		</span>
-	);
-}
-
-function ScheduleWindowRow({
-	label,
-	range,
-	chips,
-}: {
-	label?: string;
-	range: string;
-	chips: ReactNode;
-}) {
-	return (
-		<span className="flex min-w-0 items-center justify-between gap-1">
-			<span className="flex min-w-0 items-center gap-1 text-[11px] leading-4 text-sky-900">
-				{label ? <span className="shrink-0 font-semibold">{label}</span> : null}
-				<span className="whitespace-nowrap tabular-nums">{range}</span>
-			</span>
-			<span className="flex shrink-0 items-center gap-1">{chips}</span>
-		</span>
-	);
-}
-
-function RouteTargetScheduleBody({
-	windows,
-	chargedLabel,
-	meteredLabel,
-}: {
-	windows: SharedScheduleWindow[];
-	chargedLabel: string;
-	meteredLabel: string;
-}) {
-	return (
-		<span className="min-w-0 flex-1 space-y-0.5">
-			{windows.map((window, index) => (
-				<ScheduleWindowRow
-					key={`${window.start}-${window.end}-${index}`}
-					range={formatScheduleRange(window.start, window.end)}
-					chips={
-						<>
-							<ScheduleFactorChip label={chargedLabel} factor={window.charged_factor} />
-							<ScheduleFactorChip label={meteredLabel} factor={window.metered_factor} />
-						</>
-					}
-				/>
-			))}
-		</span>
-	);
-}
-
 function RouteTarget({
 	route,
 	provider,
 	stickyBindingCount,
+	stickyEnabled,
+	stickyTotal,
 	togglingId,
 	onEdit,
 	onToggleStatus,
 }: {
 	route: RouteListRow;
 	provider: GatewayProvider | undefined;
-	stickyBindingCount: number;
+	stickyBindingCount: number | null;
+	stickyEnabled: boolean;
+	stickyTotal: number | null;
 	togglingId: string | null;
 	onEdit: (route: RouteListRow) => void;
 	onToggleStatus: (route: RouteListRow) => void;
 }) {
 	const t = useTranslations('routes.flow');
 	const tList = useTranslations('routes.listItem');
-	const charged = parseChargedFactorFromPriceOverride(route.price_override);
-	const metered = parseMeteredFactorFromPriceOverride(route.price_override);
-	const chargedValue = charged != null && Number.isFinite(charged) ? charged : 1;
-	const meteredValue = metered != null && Number.isFinite(metered) ? metered : 1;
-	const scheduleWindows = resolveRouteScheduleDisplay(route.price_override);
-	const scheduleHint = formatSharedScheduleWindowsHint(scheduleWindows);
-	const hasSchedule = Boolean(scheduleHint);
-	const scheduleTooltip = t('badgeScheduleTooltip', {
-		windows: scheduleHint || '',
-	});
-	const chargedLevel = factorLevelForValue(chargedValue);
-	const meteredLevel = factorLevelForValue(meteredValue);
-	const chargedStatus = tList(`factorStatus.charged.${chargedLevel}`);
-	const meteredStatus = tList(`factorStatus.metered.${meteredLevel}`);
-	const hasPricingInversion = hasBasePricingInversion(chargedValue, meteredValue);
+	const tKind = useTranslations('providers.kind');
+	const locale = useLocale();
+	const providerName =
+		provider?.name?.trim() || (route.provider_name ?? '').trim() || route.provider_id;
+	const kindLabel = provider
+		? providerKindDisplayLabel(provider, locale, tKind('custom'))
+		: null;
+	const showKind = Boolean(
+		kindLabel && kindLabel.trim().toLowerCase() !== providerName.trim().toLowerCase()
+	);
 	const enabled = route.status === 'active';
 	const providerDisabled = provider?.status === 'disabled';
+	const available = enabled && !providerDisabled;
+
 
 	return (
 		<div
-			className={`w-full min-w-0 rounded-lg border shadow-sm transition hover:shadow-md sm:w-52 sm:max-w-full ${
-				enabled
-					? 'border-emerald-300 bg-emerald-50/70 shadow-emerald-100/60 hover:border-emerald-400'
-					: 'border-red-300 bg-red-50/70 shadow-red-100/60 hover:border-red-400'
+			className={`flex w-full min-w-0 flex-col overflow-hidden rounded-xl border border-l-4 [border-left-style:solid] transition sm:w-[18.5rem] sm:max-w-full ${
+				available
+					? 'border-emerald-200 border-l-emerald-500 bg-white shadow-sm hover:border-emerald-400 hover:shadow-md'
+					: 'border-dashed border-slate-300 border-l-slate-400 bg-slate-100/80 hover:border-slate-400'
 			}`}
 		>
-			<div className="flex items-start gap-2 p-2.5">
-				<button
-					type="button"
-					onClick={() => onToggleStatus(route)}
-					disabled={togglingId === route.id}
-					className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full ring-1 ring-inset transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-50 ${
-						enabled
-							? 'bg-emerald-600 text-white ring-emerald-600 hover:bg-emerald-700'
-							: 'bg-red-500 text-white ring-red-500 hover:bg-red-600'
-					}`}
-					title={enabled ? tList('routeEnabled') : tList('routeDisabled')}
-					aria-label={enabled ? tList('routeEnabled') : tList('routeDisabled')}
-				>
-					<PowerIcon className="h-2.5 w-2.5" />
-				</button>
-				<div className="min-w-0 flex-1">
-					<div className="flex min-w-0 items-center gap-1.5">
-						<button
-							type="button"
-							onClick={() => onEdit(route)}
-							className="min-w-0 flex-1 truncate rounded text-left text-[11px] font-semibold text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-							title={t('editRoute')}
-						>
-							{route.provider_name || provider?.name || route.provider_id}
-						</button>
-						{stickyBindingCount > 0 ? (
-							<span
-								className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-orange-800 ring-1 ring-inset ring-orange-300"
-								title={t('stickyBoundUsersTooltip', { count: stickyBindingCount })}
-								aria-label={t('stickyBoundUsersTooltip', { count: stickyBindingCount })}
+			<div className="p-2.5">
+				<div className="flex items-start gap-2">
+					{providerDisabled && (
+						<span className="inline-flex shrink-0 pt-0.5">
+							<InfoHintPopover
+								label={t('providerDisabled')}
+								openOnHover
+								portal
+								align="start"
+								panelClassName="max-w-40"
+								icon={<ExclamationTriangleIcon className="h-3.5 w-3.5 text-amber-600" aria-hidden />}
 							>
-								<UsersIcon className="h-3 w-3 shrink-0" aria-hidden />
-								<span>{stickyBindingCount}</span>
-							</span>
-						) : null}
-					</div>
+								{t('providerDisabled')}
+							</InfoHintPopover>
+						</span>
+					)}
 					<button
 						type="button"
 						onClick={() => onEdit(route)}
-						className="mt-0.5 block w-full min-w-0 truncate rounded text-left font-mono text-[10px] text-gray-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+						className="group min-w-0 flex-1 rounded text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
 						title={t('editRoute')}
 					>
-						<span title={route.provider_model_name}>{route.provider_model_name}</span>
+						<span className="flex items-center gap-1.5">
+							<span className={`min-w-0 truncate text-xs font-semibold ${available ? 'text-slate-900' : 'text-slate-600'}`} title={providerName}>{providerName}</span>
+							<PencilSquareIcon className="h-3 w-3 shrink-0 text-slate-400 group-hover:text-blue-600" aria-hidden />
+						</span>
+						<span className="mt-1 block min-h-4 truncate text-[10px] leading-4 text-slate-500" title={kindLabel ?? undefined}>
+							{showKind ? kindLabel : null}
+						</span>
 					</button>
+					<RouteStickyUsage
+						enabled={stickyEnabled}
+						count={stickyBindingCount}
+						total={stickyTotal}
+						routeAvailable={available}
+					/>
 				</div>
-			</div>
-			{/* 上游端点暂不放在路由卡片里，避免把协议映射细节和基础状态信息混在一起。 */}
-			<div className={`flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-t bg-white/55 px-2.5 py-1.5 ${
-				enabled ? 'border-emerald-200' : 'border-red-200'
-			}`}>
-				<div className="flex min-w-0 flex-wrap items-center gap-1">
-					<span
-						className="rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700 ring-1 ring-inset ring-violet-200"
-						title={t('badgeWeightTooltip', { value: route.weight ?? 1 })}
-						aria-label={t('badgeWeightTooltip', { value: route.weight ?? 1 })}
-					>
-						{`W${route.weight ?? 1}`}
-					</span>
-					{route.custom_params ? (
-						<span
-							className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 ring-1 ring-inset ring-gray-200"
-							title={
-								routeHasCustomParamsForceOverride(route.custom_params)
-									? t('badgeParamsForceOverrideTooltip')
-									: t('badgeParamsTooltip')
-							}
-							aria-label={
-								routeHasCustomParamsForceOverride(route.custom_params)
-									? t('badgeParamsForceOverrideTooltip')
-									: t('badgeParamsTooltip')
-							}
-						>
-							P
-						</span>
-					) : null}
-					{providerDisabled ? (
-						<span className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200">
-							<ExclamationTriangleIcon className="h-3 w-3" />
-							{t('providerDisabled')}
-						</span>
-					) : null}
-				</div>
-				<div className="ml-auto flex items-center justify-end gap-1">
-					<span
-						className={factorChipClassForValue(chargedValue, 'charged')}
-						title={t('badgeChargedTooltip', {
-							value: formatFactorMultiplier(chargedValue),
-							status: chargedStatus,
-						})}
-						aria-label={t('badgeChargedTooltip', {
-							value: formatFactorMultiplier(chargedValue),
-							status: chargedStatus,
-						})}
-					>
-						{`C ${formatFactorMultiplierForChip(chargedValue)}`}
-					</span>
-					<span
-						className={factorChipClassForValue(meteredValue, 'metered')}
-						title={t('badgeMeteredTooltip', {
-							value: formatFactorMultiplier(meteredValue),
-							status: meteredStatus,
-						})}
-						aria-label={t('badgeMeteredTooltip', {
-							value: formatFactorMultiplier(meteredValue),
-							status: meteredStatus,
-						})}
-					>
-						{`M ${formatFactorMultiplierForChip(meteredValue)}`}
-					</span>
-					{hasPricingInversion ? (
-						<span
-							className={`${FACTOR_CHIP_BASE} w-auto bg-rose-100 text-rose-950 ring-rose-300/90`}
-							title={tList('baseInversionTooltip')}
-						>
-							{tList('baseInversionBadge')}
-						</span>
-					) : null}
-				</div>
-			</div>
-			{hasSchedule ? (
 				<button
 					type="button"
 					onClick={() => onEdit(route)}
-					className={`flex w-full items-start gap-1 rounded-b-lg border-t bg-sky-50/70 px-2.5 py-1.5 text-left hover:bg-sky-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 ${
-						enabled ? 'border-emerald-200' : 'border-red-200'
-					}`}
-					title={scheduleTooltip}
-					aria-label={scheduleTooltip}
+					className={`mt-1.5 block w-full truncate rounded-md px-2 py-1 text-left font-mono text-[10px] leading-4 text-slate-600 hover:bg-slate-200/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${available ? 'bg-slate-50' : 'bg-white/80'}`}
+					title={route.provider_model_name}
+					aria-label={`${t('editRoute')}: ${route.provider_model_name}`}
 				>
-					<ClockIcon className="mt-0.5 h-3 w-3 shrink-0 text-sky-600" aria-hidden />
-					<RouteTargetScheduleBody
-						windows={scheduleWindows}
-						chargedLabel={t('chargedShort')}
-						meteredLabel={t('meteredShort')}
-					/>
+					{route.provider_model_name}
 				</button>
-			) : null}
+				<div className="mt-2 flex min-h-4 flex-wrap items-center gap-x-2 gap-y-1 text-[10px] leading-4">
+					<button
+						type="button"
+						onClick={() => onToggleStatus(route)}
+						disabled={togglingId === route.id}
+						aria-pressed={enabled}
+						className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-50 ${enabled ? (providerDisabled ? 'bg-slate-200 text-slate-600 hover:bg-slate-300' : 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200') : 'bg-slate-600 text-white hover:bg-slate-700'}`}
+						title={enabled ? tList('routeEnabled') : tList('routeDisabled')}
+						aria-label={enabled ? tList('routeEnabled') : tList('routeDisabled')}
+					>
+						<PowerIcon className="h-3 w-3" aria-hidden />
+						{enabled ? t('enabledShort') : t('disabledShort')}
+					</button>
+					<span className="tabular-nums text-slate-600" title={t('badgeWeightTooltip', { value: route.weight ?? 1 })}>
+						{t('targetWeight', { value: route.weight ?? 1 })}
+					</span>
+					{route.custom_params ? (
+						<span className="rounded bg-slate-100 px-1.5 text-slate-500" title={routeHasCustomParamsForceOverride(route.custom_params) ? t('badgeParamsForceOverrideTooltip') : t('badgeParamsTooltip')}>
+							{t('targetParams')}
+						</span>
+					) : null}
+				</div>
+			</div>
+			<RouteTargetPricing priceOverride={route.price_override} onEdit={() => onEdit(route)} />
 		</div>
 	);
 }
@@ -420,10 +290,15 @@ export function FlowConnectorAdd({
 	);
 }
 
-function stickyTargetsFromSection(section: RouteProtocolGroupSection<RouteListRow>) {
+function stickyTargetsFromSection(
+	section: RouteProtocolGroupSection<RouteListRow>,
+	providerMeta: Map<string, GatewayProvider>,
+	locale: string,
+	customLabel: string,
+) {
 	return section.routes.map((route) => ({
 		id: route.id,
-		providerName: route.provider_name || route.provider_id,
+		providerName: routeProviderAccountLabel(route, providerMeta.get(route.provider_id), locale, customLabel),
 		priority: route.priority,
 		weight: Number(route.weight ?? 1) || 1,
 	}));
@@ -433,6 +308,9 @@ export function openSectionStickyDialog(
 	onOpen: OpenProviderStickyDialog,
 	card: RouteModelGroup,
 	section: RouteProtocolGroupSection<RouteListRow>,
+	providerMeta: Map<string, GatewayProvider>,
+	locale: string,
+	customLabel: string,
 ) {
 	onOpen(
 		card.model_id,
@@ -444,7 +322,7 @@ export function openSectionStickyDialog(
 		section.poolId,
 		section.poolStickyEnabled,
 		section.poolStickyIdleTtlSeconds,
-		stickyTargetsFromSection(section),
+		stickyTargetsFromSection(section, providerMeta, locale, customLabel),
 	);
 }
 
@@ -647,6 +525,7 @@ function PriorityTierPanel({
 	providerMeta,
 	globalRouteStrategy,
 	stickyCountsByTarget,
+	stickyTotal,
 	togglingId,
 	onEdit,
 	onToggleStatus,
@@ -664,6 +543,7 @@ function PriorityTierPanel({
 	providerMeta: Map<string, GatewayProvider>;
 	globalRouteStrategy: string | null;
 	stickyCountsByTarget: Map<string, number>;
+	stickyTotal: number | null;
 	togglingId: string | null;
 	onEdit: Props['onEdit'];
 	onToggleStatus: Props['onToggleStatus'];
@@ -671,8 +551,10 @@ function PriorityTierPanel({
 }) {
 	const t = useTranslations('routes.flow');
 	const tStrategy = useTranslations('routes.strategy');
+	const tKind = useTranslations('providers.kind');
+	const locale = useLocale();
 	const isSummary = density === 'summary';
-	const summary = summarizePriorityTier(routes, providerMeta);
+	const summary = summarizePriorityTier(routes, providerMeta, locale, tKind('custom'));
 	const strategy = resolveEffectiveRouteStrategy({
 		poolStrategy: section.poolStrategy,
 		poolTierStrategies: section.poolTierStrategies,
@@ -699,15 +581,15 @@ function PriorityTierPanel({
 		<div
 			className={
 				isSummary
-					? 'min-w-0 max-w-full rounded-lg border border-slate-200 bg-white/80 shadow-sm'
-					: 'w-fit min-w-0 max-w-full rounded-lg border border-slate-200 bg-white/80 p-2.5 shadow-sm'
+					? 'min-w-0 max-w-full'
+					: 'w-fit min-w-0 max-w-full'
 			}
 		>
 			<div
 				className={
 					isSummary
-						? `flex min-w-0 cursor-pointer flex-wrap items-center gap-1.5 px-2.5 py-2 transition hover:bg-slate-50/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 ${showDetails ? 'border-b border-slate-100' : ''}`
-						: 'mb-2 flex min-w-0 flex-wrap items-center gap-1.5 border-b border-slate-100 pb-2'
+						? 'mb-2 flex min-w-0 cursor-pointer flex-wrap items-center gap-1.5 rounded-md px-0.5 py-1 transition hover:bg-slate-100/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500'
+						: 'mb-2 flex min-w-0 flex-wrap items-center gap-1.5 px-0.5 py-1'
 				}
 				{...(isSummary
 					? {
@@ -738,7 +620,7 @@ function PriorityTierPanel({
 						/>
 					</span>
 				) : null}
-				<span className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] font-bold text-white">
+				<span className="rounded bg-slate-200/70 px-1.5 py-0.5 text-[10px] font-bold text-slate-700">
 					P{priority}
 				</span>
 				<span className="text-[10px] font-medium text-gray-500">{layerLabel}</span>
@@ -760,6 +642,7 @@ function PriorityTierPanel({
 						})}
 					</span>
 				) : null}
+				<span className="h-px min-w-3 flex-1 bg-slate-200" aria-hidden />
 				<div
 					className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5"
 					onClick={isSummary ? (event) => event.stopPropagation() : undefined}
@@ -783,7 +666,7 @@ function PriorityTierPanel({
 								}
 							)
 						}
-						className="inline-flex max-w-full items-center gap-1 rounded-md bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700 ring-1 ring-inset ring-indigo-200 transition hover:bg-indigo-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+						className="inline-flex max-w-full items-center gap-1 rounded px-1 py-0.5 text-[10px] font-medium text-indigo-600 transition hover:bg-indigo-50 hover:text-indigo-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
 						title={t('tierStrategyEdit', {
 							strategy: displayName,
 							source: sourceLabel,
@@ -799,7 +682,7 @@ function PriorityTierPanel({
 				<button
 					type="button"
 					onClick={onToggleExpanded}
-					className="flex w-full min-w-0 flex-wrap items-center gap-1.5 px-2.5 py-2.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500"
+					className="flex w-full min-w-0 flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2.5 text-left hover:border-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500"
 					aria-label={t('expandTierAria', { priority })}
 				>
 					{summary.previewItems.map((item) => (
@@ -819,6 +702,12 @@ function PriorityTierPanel({
 								aria-hidden
 							/>
 							<span className="min-w-0 truncate">{item.name}</span>
+							{section.poolStickyEnabled ? (
+								<span className={`inline-flex shrink-0 items-center gap-1 border-l pl-1.5 tabular-nums ${(stickyCountsByTarget.get(item.id) ?? 0) > 0 ? 'border-indigo-200 text-indigo-700' : 'border-slate-300 text-slate-500'}`} title={stickyTotal == null ? t('stickyUsage.unavailable') : t('stickyBoundUsersTooltip', { count: stickyCountsByTarget.get(item.id) ?? 0 })}>
+									<UsersIcon className="h-3 w-3" aria-hidden />
+									{stickyTotal == null ? '—' : (stickyCountsByTarget.get(item.id) ?? 0).toLocaleString(locale)}
+								</span>
+							) : null}
 						</span>
 					))}
 					{summary.previewItems.length === 0 ? (
@@ -828,13 +717,15 @@ function PriorityTierPanel({
 			) : null}
 
 			{showDetails ? (
-				<div className={`flex min-w-0 flex-wrap gap-2 ${isSummary ? 'px-2.5 pb-2.5 pt-2' : ''}`}>
+				<div className="flex min-w-0 flex-wrap gap-2 overflow-x-auto pb-0.5">
 					{routes.map((route) => (
 						<RouteTarget
 							key={route.id}
 							route={route}
 							provider={providerMeta.get(route.provider_id)}
-							stickyBindingCount={stickyCountsByTarget.get(route.id) ?? 0}
+							stickyBindingCount={stickyTotal == null ? null : stickyCountsByTarget.get(route.id) ?? 0}
+							stickyEnabled={section.poolStickyEnabled}
+							stickyTotal={stickyTotal}
 							togglingId={togglingId}
 							onEdit={onEdit}
 							onToggleStatus={onToggleStatus}
@@ -875,6 +766,8 @@ export function UpstreamPoolPanel({
 	onOpenStrategyDialog,
 }: UpstreamPoolPanelProps) {
 	const t = useTranslations('routes.flow');
+	const tKind = useTranslations('providers.kind');
+	const locale = useLocale();
 	const [failoverOpen, setFailoverOpen] = useState(false);
 	const priorityLayers = [...section.routes.reduce((map, route) => {
 		const layer = map.get(route.priority) ?? [];
@@ -884,10 +777,13 @@ export function UpstreamPoolPanel({
 	}, new Map<number, RouteListRow[]>())]
 		.sort(([a], [b]) => b - a)
 		.map(([priority, routes]) =>
-			[priority, [...routes].sort(compareRoutesWithinPriorityLayer)] as const
+			[priority, [...routes].sort((a, b) => compareRoutesWithinPriorityLayer(a, b, {
+				providersById: providerMeta,
+				locale,
+				customKindLabel: tKind('custom'),
+			}))] as const
 		);
-	const highestPriority = priorityLayers[0]?.[0];
-	/** Explicit user overrides; missing keys mean "default" (highest priority expanded). */
+	/** Compact mode starts collapsed; keep per-tier expansion choices while switching views. */
 	const [tierExpandOverrides, setTierExpandOverrides] = useState<Record<number, boolean>>({});
 	const stickyPoolId = section.poolStickyEnabled ? section.poolId : null;
 	const stickySummary = useStickySummary(stickyPoolId);
@@ -903,7 +799,7 @@ export function UpstreamPoolPanel({
 		if (Object.prototype.hasOwnProperty.call(tierExpandOverrides, priority)) {
 			return tierExpandOverrides[priority] === true;
 		}
-		return priority === highestPriority;
+		return false;
 	};
 
 	const togglePriority = (priority: number) => {
@@ -911,7 +807,7 @@ export function UpstreamPoolPanel({
 			const currently =
 				Object.prototype.hasOwnProperty.call(prev, priority)
 					? prev[priority] === true
-					: priority === highestPriority;
+					: false;
 			return { ...prev, [priority]: !currently };
 		});
 	};
@@ -924,8 +820,10 @@ export function UpstreamPoolPanel({
 				className={
 					isSummary
 						? 'flex min-w-0 flex-col items-stretch gap-1'
-						: 'flex min-w-0 flex-col items-stretch gap-3 md:flex-row md:flex-nowrap md:items-center md:overflow-x-auto'
+						: 'route-flow-scroll flex min-w-0 flex-col items-stretch gap-3 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/50 md:flex-row md:flex-nowrap md:items-center md:overflow-x-auto md:pb-3'
 				}
+				role="region"
+				tabIndex={isSummary ? undefined : 0}
 				aria-label={t('priorityLadderAria')}
 			>
 				{priorityLayers.map(([priority, routes], layerIndex) => (
@@ -956,6 +854,7 @@ export function UpstreamPoolPanel({
 							providerMeta={providerMeta}
 							globalRouteStrategy={globalRouteStrategy}
 							stickyCountsByTarget={stickyCountsByTarget}
+							stickyTotal={stickySummary?.total_active ?? null}
 							togglingId={togglingId}
 							onEdit={onEdit}
 							onToggleStatus={onToggleStatus}
@@ -995,6 +894,8 @@ function FlowBranch({
 	onOpenProviderStickyDialog: Props['onOpenProviderStickyDialog'];
 }) {
 	const t = useTranslations('routes.flow');
+	const tKind = useTranslations('providers.kind');
+	const locale = useLocale();
 	const isSummary = density === 'summary';
 	const isDefaultGroup = section.group === 'default';
 	const groupRail = isDefaultGroup ? 'bg-sky-300' : 'bg-violet-300';
@@ -1034,7 +935,15 @@ function FlowBranch({
 							enabled: section.poolStickyEnabled,
 							idleTtlSeconds: section.poolStickyIdleTtlSeconds,
 							poolId: section.poolId,
-							onClick: () => openSectionStickyDialog(onOpenProviderStickyDialog, card, section),
+							onClick: () =>
+								openSectionStickyDialog(
+									onOpenProviderStickyDialog,
+									card,
+									section,
+									providerMeta,
+									locale,
+									tKind('custom'),
+								),
 						}}
 					/>
 					<FlowConnectorAdd

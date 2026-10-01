@@ -31,6 +31,7 @@ Authorization: Bearer sk-admin-<64 hex characters>
 
 - **计费币种**：`system_config.BILLING_CURRENCY` 仅允许 **`USD`** 或 **`CNY`**（各库的 **`0002_seed.sql`** 默认 `USD`），与 `pricing_profile` / Key 预算数值单位一致；`GET /v1/me` 返回 `billing_currency`（见用户接口文档）。**`PUT /admin/config`** 写入该键时由服务端白名单校验。
 - **全局路由策略**：`system_config.ROUTE_STRATEGY`（默认 `hash_affinity`；四选一，见 [route-strategies.md](../reference/route-strategies.md)）。**`PUT /admin/config`** 白名单校验；Route Pool / 模型级配置可覆盖。
+- **用户计费倍率合成**：`system_config.USER_CHARGED_COST_FACTOR_MODE`（默认 `multiply`；另允许 `min`）。控制 `users.charged_cost_factors` 如何与路由 Charged 有效倍率合成最终用户费用。**`PUT /admin/config`** 白名单校验；Proxy 进程内缓存约 30s。
 - **Proxy 错误告警（可选）**：`ALERT_WEBHOOK_WECOM_URL`、`ALERT_WEBHOOK_FEISHU_URL` 存**完整**群机器人 Webhook URL（含 query `key` / hook id）。**未配置或值为空则不告警**。Proxy 在 **`api_key_request_logs.status = error`** 且用量写入成功后，分别向已配置的 URL 发送一条**按错误类型归类**的文本摘要（企业微信 `msgtype=text`、飞书 `msg_type=text`）：首行含类别与优先级（如上游超时、供应商鉴权、限流、5xx、敏感内容拦截、请求/模型错误、路由配置），并分组展示影响用户、路由/协议、供应商、原始 `error_message`、处理建议与发生时间（UTC+8）；发送失败只打日志，不影响请求。键名常量见 `@octafuse/core` 导出 `ALERT_WEBHOOK_WECOM_URL_KEY` / `ALERT_WEBHOOK_FEISHU_URL_KEY`。
 
 ### `/admin/keys` 统一响应格式
@@ -52,6 +53,7 @@ Authorization: Bearer sk-admin-<64 hex characters>
 |------|------|----------------|--------|
 | `/admin/users` | GET, POST | `users`（分页列表 / 按外部对幂等创建） | Admin UI、外部集成方 |
 | `/admin/users/:id` | GET, PATCH, DELETE | `users`（`:id` 为 uuid 或 `ext:…` 外部路由，见下节） | Admin UI、外部集成方 |
+| `/admin/users/:id/display-discounts` | GET | 该用户 `charged_cost_factors` 叠进公开目录 `discounts`（只返回已配置倍率的模型） | 外部集成方 |
 | `/admin/users/:id/keys` | GET, POST | `api_keys`（用户范围内） | Admin UI |
 | `/admin/users/:id/keys/:keyId` | PATCH, DELETE | `api_keys` | Admin UI |
 | `/admin/users/:id/logs` | GET | `api_key_request_logs`（按 `user_id`） | Admin UI |
@@ -66,8 +68,9 @@ Authorization: Bearer sk-admin-<64 hex characters>
 | `/admin/keys/:id/logs` | GET | `api_key_request_logs`（Key 范围，分页） | 外部集成方、Admin UI |
 | `/admin/providers` | GET, POST, GET/PATCH/DELETE `/:id` | `providers`（单键 `api_key` + `status`；列表脱敏） | Admin UI |
 | `/admin/providers/:id/api-key` | GET | `providers.api_key` 明文揭示 | Admin UI |
+| `/admin/providers/:id/quota` | GET | 按 `kind` 实时查询上游余额 / 周期额度；不落库、不回显密钥 | Admin UI |
 | `/admin/providers/import/catalog` | GET | 内置 Provider 模板摘要（无密钥） | Admin UI |
-| `/admin/providers/import` | POST | 请求体 `{"ids":["0","1",…]}`：catalog 键（非 provider id）；每次导入新增 `providers` 行（UUID id；同名自动后缀）；占位 API Key，须在 Admin 中替换 | Admin UI、运维脚本 |
+| `/admin/providers/import` | POST | 请求体 `{"ids":["0","1",…]}`：catalog 键（非 provider id）；每次导入新增 `providers` 行（UUID id；`kind` 为模板英文名；同一 `kind` 下同名自动后缀）；占位 API Key，须在 Admin 中替换 | Admin UI、运维脚本 |
 | `/admin/models` | GET, POST, GET/PATCH/DELETE `/:id` | `models`（含可选 `route_policy`），`model_tags` | Admin UI |
 | `/admin/models/import/catalog` | GET | 内置静态目录可选项摘要（不含完整 `pricing_profile`） | Admin UI |
 | `/admin/models/import` | POST | 请求体 `{"ids":["…"]}`：仅导入指定预设 → `models`（按 `BILLING_CURRENCY` 选用 USD/CNY 价；**同 id 不覆盖**，记入 `skipped_existing`；**不**写入 `model_tags`） | Admin UI、运维脚本 |
@@ -77,9 +80,9 @@ Authorization: Bearer sk-admin-<64 hex characters>
 | `/admin/routes/pools/:poolId/sticky/bindings/lookup` | GET | 按 `user_id` / `email` + surface 上下文反查单用户绑定 | Admin UI |
 | `/admin/routes/pools/:poolId/sticky/bindings/:affinityHash` | DELETE | 强制解绑（不校验 `binding_token`） | Admin UI |
 | `/admin/routes/pools/:poolId/sticky/reset` | POST | bump `sticky_epoch`，使本 pool 全部绑定失效 | Admin UI |
-| `/admin/playground` | POST | Routes：`routeId` 直连上游；Tools：`toolId`+`provider` 读 catalog 直连引擎（均可测、不计费、不写日志、无 failover） | Admin UI、运维联调 |
+| `/admin/playground` | POST | Routes：`routeId` 或 `routeDraft` 直连上游；Tools：`toolId`+`provider` 读 catalog 直连引擎（均可测、不计费、不写日志、无 failover） | Admin UI、运维联调 |
 | `/admin/stats` | GET | 多表聚合（含 `api_key_request_logs`、`api_keys` 等） | Admin UI |
-| `/admin/config` | GET, PUT | `system_config`（含 `ROUTE_STRATEGY`） | Admin UI |
+| `/admin/config` | GET, PUT | `system_config`（含 `ROUTE_STRATEGY`、`USER_CHARGED_COST_FACTOR_MODE`） | Admin UI |
 | `/admin/access-keys`、`/:id`、`/:id/secret`、`/:id/rotate`、`/:id/revoke` | GET, POST, PATCH | `admin_api_keys`；仅 Console Session，同源写请求 | Admin UI |
 | `/admin/business-timezone` | GET | `system_config.BUSINESS_TIMEZONE` | Admin UI（Provider 首屏加载） |
 | `/admin/request-logs` | GET | `api_key_request_logs`（**GlobalLogs**，多条件筛选分页） | Admin UI |
@@ -90,6 +93,8 @@ Authorization: Bearer sk-admin-<64 hex characters>
 | `/admin/analytics/keys` | GET | `api_key_request_logs`，按 `api_key_id` 聚合（需 `user_id`） | 外部集成方、Admin UI |
 | `/admin/analytics/reliability` | GET | `api_key_request_logs` | Admin UI |
 
+`POST /admin/playground` 的 `routeId`、`routeDraft`、`toolId` 三选一。路由编辑器「快速测试」使用 `routeDraft`，包含 `model_id`、`provider_id`、`provider_model_name`、`request_protocol`、`request_operation`、`upstream_protocol`、`upstream_operation`、`adapter` 与可选的 `custom_params`（JSON 对象或字符串）；`body` 为测试请求对象。草稿只在本次请求中生效，不创建或更新路由，供应商端点与密钥仍从服务端读取。响应、流式输出及 `x-playground-*` 调试头与 `routeId` 模式一致；实时 WebSocket 仍使用已保存的 `routeId`。
+
 说明：**GlobalLogs**（`/admin/request-logs`）与 **KeyScopedLogs**（`/admin/keys/:id/logs`）互补；**UserScopedLogs**（`/admin/users/:id/logs`）按 `user_id` 拉全量请求历史。**全局审计列表**（`/admin/budget-audit-logs`，表为 **`user_audit_logs`**）记录预算与用户/密钥生命周期事件，与请求日志正交。各类审计行何时产生（含高频 `usage_charge`）见 [`../reference/user-audit-logs.md`](../reference/user-audit-logs.md)。**数据模型总览**见 [`../architecture/user-keys-data-model.md`](../architecture/user-keys-data-model.md)。
 
 ### 与 Proxy `GET /catalog/models` 的区别 {#admin-vs-proxy-catalog}
@@ -98,11 +103,11 @@ Authorization: Bearer sk-admin-<64 hex characters>
 
 | 接口 | 部署 | 鉴权 | 数据含义 |
 |------|------|------|----------|
-| **`GET /catalog/models`**（Proxy） | `GATEWAY_URL` | 无 | **运行时**可调用模型 + `protocols` / `protocols_by_group`（由 active `model_routes` 聚合） |
+| **`GET /catalog/models`**（Proxy） | `GATEWAY_URL` | 无 | **运行时**可调用模型 + `protocols` / `protocols_by_group` / `inbound`（由 active `model_routes` 聚合） |
 | **`GET /admin/models`** | Admin `/api/admin/*` | Console Session 或 `models.read` | 库内 **全部**模型 CRUD 列表（含 tags、路由计数；**不**含按 route 的协议聚合） |
 | **`GET /admin/models/import/catalog`** | Admin | Console Session 或 `models.read` | 仓库内 **静态 preset** 摘要，供导入 UI 勾选，**非**运行时 route 真相 |
 
-门户 / 公开站应使用 Proxy **`GET /catalog/models`**，详见 [用户接口 · 公开模型目录](./user.md#公开模型目录catalog-discovery)。Agent 与兼容客户端默认仍用 **`GET /v1/models`**（需用户 Key，默认 `default,free` route group）。
+门户 / 公开站应使用 Proxy **`GET /catalog/models`**，详见 [用户接口 · 公开模型目录](./user.md#公开模型目录catalog-discovery)。用户个性化折扣用 **`GET /admin/users/:id/display-discounts`** overlay。门户仍走 Catalog + display-discounts；Agent 拉列表不再计入 RPM。Agent 与兼容客户端默认仍用 **`GET /v1/models`**（需用户 Key，默认 `default,free` route group）。
 
 ---
 
@@ -144,6 +149,16 @@ Authorization: Bearer sk-admin-<64 hex characters>
 ### `GET /admin/users/:id`
 
 用户详情（`getUserInfo`：含预算列、外部身份、`charged_cost_factors` 对象或 `null`、`rate_limit` 等；周期型预算可能触发懒重置）。**不含**密钥列表；枚举密钥请用 **`GET /admin/users/:id/keys`**。用户列表行（`GET /admin/users`）含 **`active_keys_count`**、**`keys_count`**，以及与详情相同的 **`rate_limit`** 与 `charged_cost_factors`（对象或 `null`）。
+
+### `GET /admin/users/:id/display-discounts`
+
+只读：把该用户 `charged_cost_factors` 按全局 `USER_CHARGED_COST_FACTOR_MODE` 叠进公开目录同款 `discounts`（官方时段 × 代表路由 Charged，再叠用户倍率）。需 **`users.read`**。**只返回配置了该模型倍率的条目**；未配置时 `data` 为空数组。不计入用户 API Key / 用户合计 RPM。
+
+可选 query：`route_groups`（CSV，大小写不敏感）。省略或空 → 全部 active 路由组（与 `GET /catalog/models` 相同，**不是** `/v1/models` 的 `default,free` 默认）。
+
+响应：`{ success, data: [{ id, discounts }] }`。`discounts` 形状与 `GET /catalog/models` / `GET /v1/models` 的 `discounts` 相同。不要用 **`GET /admin/models`**（运维 CRUD，无展示折扣）。
+
+公开目录用 `GET /catalog/models`，用户个性化折扣用本接口 overlay；Agent 仍用用户 Key 的 `GET /v1/models`。
 
 ### `PATCH /admin/users/:id`
 
@@ -407,7 +422,7 @@ PATCH /admin/keys/:id
 | `status` | 可选；如 `active`、`revoked` |
 | `metadata` | 可选；**对象**时与现有 key `metadata` **合并**；**字符串**时视为整段替换（与 `metadata_replace` 语义相同） |
 | `metadata_replace` | 可选；JSON 字符串，整段替换 metadata；勿与对象形式的 `metadata` 同时使用 |
-| `rate_limit` | 可选；JSON 对象。`null` 表示该 Key 不限。当前仅支持 `rpm`（非负整数，该 Key 从当前时刻回溯 60 秒的滚动窗口内允许的请求数；`0` 拒绝所有计次请求）。与用户层 `users.rate_limit` **双重执行**（两层都是回溯 60 秒，各自独立计数），两者都要通过；超限仍返回同一 `429` + `gateway.rate_limited`（不区分哪一层）。`GET /v1/me` 两层都不计入。计数在代理服务进程内存中（多 isolate / 多副本为软上限）。省略则不改 |
+| `rate_limit` | 可选；JSON 对象。`null` 表示该 Key 不限。当前仅支持 `rpm`（非负整数，该 Key 从当前时刻回溯 60 秒的滚动窗口内允许的请求数；`0` 拒绝所有计次请求）。与用户层 `users.rate_limit` **双重执行**（两层都是回溯 60 秒，各自独立计数），两者都要通过；超限仍返回同一 `429` + `gateway.rate_limited`（不区分哪一层）。`GET /v1/me` 与 `GET /v1/models` 两层都不计入。计数在代理服务进程内存中（多 isolate / 多副本为软上限）。省略则不改 |
 | `reason` | 可选；写入用户审计等文案，缺省由服务端默认 |
 
 ### 响应
@@ -588,7 +603,7 @@ GET /admin/keys/:id/logs?page=1&page_size=20&exclude_status=incomplete
 }
 ```
 
-> 注：LLM、Audio token 与 Image token 模式按 `models.pricing_profile.tiers` 选档；Image `per_image`、Audio `per_second` 与 Agent Tool `fixed_tool_cost` 使用各自计费基数。模型请求中，`standard_cost` = 阶梯目录价 × 模型官方时段倍率（官方当刻价，不乘路由倍率）；`metered_cost` / 路由侧 `charged_cost` = 官方当刻价 × 路由有效倍率（无 `schedule.mode` 时叠乘；`override` 时窗内用窗口 factor）；若 `users.charged_cost_factors` 含该目录模型 ID，再对路由用户计费乘一次该倍率并六位四舍五入（只改最终 `charged_cost` 与预算累加）。**Tools** 在 catalog 直接配置三账本绝对单价（`metered` / `standard` / `charged`，无 Route factor/schedule，也不应用用户计费倍率或模型官方时段），成功后分别写入三列，仅 `charged_cost` 累加预算。嵌套 `metered`/`charged` tiers **不计价**。**`pricing_audit`** 新写入为 **v5**（模型见 `packages/core/src/db/pricing-audit.ts`；Tools 仍为 `kind=fixed_tool_cost` + `unit_prices` / `totals`；v4 历史行仍可解析，v5 模型审计可带 `catalog_schedule` 与 `user_charged_factor`，未命中为 `null`）。**`request_protocol`** 为客户端调用的 Gateway 入口协议；**`upstream_protocol`** 为本次请求所选路由的 `model_routes.upstream_protocol` 快照。历史字段 `total_cost` 与 **`billing_factor`** 列已移除。列表接口返回列为 `api_key_request_logs` 全字段（与 `packages/core/src/types.ts` 中 `RequestLogRow` 一致）。
+> 注：LLM、Audio token 与 Image token 模式按 `models.pricing_profile.tiers` 选档；Image `per_image`、Audio `per_second` 与 Agent Tool `fixed_tool_cost` 使用各自计费基数。模型请求中，`standard_cost` = 阶梯目录价 × 模型官方时段倍率（官方当刻价，不乘路由倍率，也不乘 `provider_factor`）；`metered_cost` / 路由侧 `charged_cost` = 官方当刻价 × 有效期内的 `provider_factor` × 该侧路由有效倍率（无 `schedule.mode` 时叠乘；`override` 时窗内用窗口 factor；有效期外供应商倍率为 `1`）；若 `users.charged_cost_factors` 含该目录模型 ID，再按 `system_config.USER_CHARGED_COST_FACTOR_MODE`（默认 `multiply` 叠乘，`min` 取较小倍率）合成最终用户费用并六位四舍五入（只改最终 `charged_cost` 与预算累加）。**Tools** 在 catalog 直接配置三账本绝对单价（`metered` / `standard` / `charged`，无 Route factor/schedule，也不应用用户计费倍率或模型官方时段），成功后分别写入三列，仅 `charged_cost` 累加预算。嵌套 `metered`/`charged` tiers **不计价**。**`pricing_audit`** 新写入为 **v6**（模型见 `packages/core/src/db/pricing-audit.ts`；Tools 仍为 `kind=fixed_tool_cost` + `unit_prices` / `totals`；v4 / v5 历史行仍可解析，v6 模型审计可带 `provider_factor`、`catalog_schedule`、`user_charged_factor`、`user_charged_factor_mode` 与 `combined_charged_factor`，用户未命中时 factor 为 `null`）。**`request_protocol`** 为客户端调用的 Gateway 入口协议；**`upstream_protocol`** 为本次请求所选路由的 `model_routes.upstream_protocol` 快照。历史字段 `total_cost` 与 **`billing_factor`** 列已移除。列表接口返回列为 `api_key_request_logs` 全字段（与 `packages/core/src/types.ts` 中 `RequestLogRow` 一致）。
 
 ### 示例
 
@@ -603,17 +618,55 @@ curl "http://localhost:8789/api/admin/keys/uuid-here/logs?page=1&page_size=10" \
 
 ### Providers（`/admin/providers`）
 
-一个 Provider = **一把** `api_key` + **`status`**（`active` \| `disabled`）。**无** `/admin/providers/:id/keys*` 子资源（迁移 0015 已删除 `provider_api_keys`）。
+一个 Provider = **一把** `api_key` + **`status`**（`active` \| `disabled`）+ **`kind`**。**无** `/admin/providers/:id/keys*` 子资源（迁移 0015 已删除 `provider_api_keys`）。
+
+`name` 是账号别名。`kind` 取导入模板的稳定英文 `name`（如 `OpenCode Zen`），或显式自定义 `__custom__`。已有行默认 `''`，表示尚未分类。唯一约束是 `(name, kind)`：同一别名可以属于不同类型；同一类型下同名返回 **409**，正文为 `A provider with this name and type already exists`。列表与详情会附带运行时解析的 `kind_labels`、`vendor_key`、`icon_key`、`catalog_links`（不落库）。已设置 `kind` 时图标与链接只跟模板走；`__custom__` 使用通用图标；空 `kind` 仍按名称与 Endpoint 推断。
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/admin/providers` | 列表；`api_key` **脱敏**；含 `endpoints`、`status`、`has_pending_key`、`routes_count`、`active_routes_count` |
-| POST | `/admin/providers` | 创建；**`name` + `api_key` 必填**；可选 `id`、`description`、`endpoints`、`status` |
+| GET | `/admin/providers` | 列表；`api_key` **脱敏**；含 `kind`、`endpoints`、`status`、`has_pending_key`、`quota_supported`、`routes_count`、`active_routes_count` |
+| POST | `/admin/providers` | 创建；**`name` + `api_key` + `kind` 必填**；`kind` 须为已知模板英文名或 `__custom__`；管理后台不提交 `id`，由服务端生成 UUID。API 仍可传可选 `id`。另可传 `description`、`endpoints`、`status` |
 | GET | `/admin/providers/:id` | 详情（脱敏 `api_key`） |
-| PATCH | `/admin/providers/:id` | 部分更新；`api_key` 空串/未传 = **不改密钥**；`status` 仅 `active` \| `disabled` |
+| PATCH | `/admin/providers/:id` | 部分更新；省略 `kind` = 不改类型；`kind: ""` = 标为尚未分类；`api_key` 空串/未传 = **不改密钥**；`status` 仅 `active` \| `disabled`。改 `kind` 不覆盖已有 `endpoints` |
 | DELETE | `/admin/providers/:id` | 删除；仍被 `model_routes` 引用时返回 **409**，须先删除或改绑对应 Target |
 | GET | `/admin/providers/:id/api-key` | **揭示明文** `api_key`（`{ success, data: { api_key } }`） |
-| GET / POST | `/admin/providers/import/catalog`、`/import` | 静态模板导入（占位 key，须手动替换） |
+| GET | `/admin/providers/:id/quota` | 用该账号现有 `api_key` 实时查询额度。权限是 `providers.read`，响应不含密钥。不支持的 `kind`、空密钥或导入占位密钥返回 **400**。上游非 2xx 或响应无法解析返回 **502**（`message` 只有状态码，没有响应体）。超时返回 **504** |
+| GET / POST | `/admin/providers/import/catalog`、`/import` | 静态模板导入（占位 key，须手动替换）。写入 `kind =` 模板英文名；仅同一 `kind` 下同名才追加 `(2)` 后缀 |
+
+`GET /admin/providers/:id/quota` 的 `data` 是归一化快照，不保存。请求发往与该 `kind` 默认域名同一注册域的 https origin；保存的 Endpoint 若换了注册域，则回退默认 origin。
+
+```json
+{
+  "success": true,
+  "data": {
+    "adapter": "deepseek",
+    "checkedAt": "2026-09-25T05:00:00.000Z",
+    "state": "ok",
+    "balances": [{ "currency": "CNY", "total": 9.99, "granted": 0, "paid": 9.99 }],
+    "windows": []
+  }
+}
+```
+
+`state` 为 `ok`、`low`（任一窗口已用 ≥ 90%）、`exhausted`（返回的余额全部 ≤ 0、厂商标记不可用，或任一窗口已用 ≥ 100%）或 `unknown`。
+
+| `kind` | 上游 | 映射 |
+|--------|------|------|
+| `DeepSeek` | `GET /user/balance` | 余额（含币种、赠送、充值） |
+| `Moonshot AI` | `GET /v1/users/me/balance` | 可用余额、代金券、现金。`api.moonshot.cn` 为 CNY，`api.moonshot.ai` 为 USD |
+| `SiliconFlow` | `GET /v1/user/info` | `totalBalance` / `balance` / `chargeBalance`，币种 CNY |
+| `SiliconFlow (International)` | 同上，`api.siliconflow.com` | 同上，币种 USD |
+| `OpenRouter` | `GET /api/v1/key` | Key 消费上限窗口 `key_limit`（USD）。未设上限时没有 `usedPercent` |
+| `Novita AI` | `GET /openapi/v1/billing/balance/detail` | `availableBalance` / `cashBalance`，单位是 1/10000 USD |
+| `DeepInfra` | `GET /payment/checklist` | 负的 `stripe_balance` 转为可消费 USD；正的 `limit` 与 `recent` 组成消费上限窗口。`suspended: true` 视为已用尽 |
+| `StepFun` | `GET /v1/accounts` | `balance` 为可用余额（CNY）。累计充值与累计赠送不写入快照 |
+| `Vercel AI Gateway` | `GET /v1/credits` | `balance` 为剩余额度（USD） |
+| `OpenCode Go` | `GET /zen/go/v1/usage` | `rolling` / `weekly` / `monthly` 的已用百分比与重置时间。`rolling` 记为 `5h`。`status: rate-limited` 视为该窗口已用尽 |
+| `MiniMax` | `GET https://www.minimaxi.com/v1/token_plan/remains`，失败时再请求 `GET https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains` | 优先取 `general` 模型的 5 小时与每周窗口。`*_usage_count` 是剩余次数；次数为 0 时改用剩余百分比。两台主机都在 `minimaxi.com` 上 |
+| `Zhipu GLM (Coding Plan)` | `GET /api/monitor/usage/quota/limit` | `CREDIT_LIMIT` / `TOKENS_LIMIT`。`unit=3,number=5` 为 5 小时，`unit=6,number=1` 为每周。`usage` 是上限，`percentage` 是已用百分比 |
+| `Z.AI GLM (Coding Plan)` | 同上，`api.z.ai` | 同上 |
+
+`Kimi Code (Coding API)` 的额度接口没有稳定公开契约，当前 `quota_supported` 为 false。ZenMux、xAI、OpenAI、Anthropic 以及火山、百炼、腾讯的余额查询需要另一把管理密钥或 AK/SK，也不在这一接口里。
 
 `endpoints` JSON 权威形状：
 
@@ -701,7 +754,7 @@ curl "http://localhost:8789/api/admin/keys/uuid-here/logs?page=1&page_size=10" \
 
 ### `GET /admin/models/import/catalog`
 
-- **行为**：返回 `packages/admin/lib/model-presets/*.json`（合并后）每条预设的摘要（`id`、`display_name`、`vendor`、`context_window`、`max_tokens`、`description`、`i18n`、`tier_count`、`pricing_label`、`pricing_preview`），供管理端勾选后再调用 **`POST /admin/models/import`**。英文描述与本地化摘要直接维护在对应的模型预设记录中。价格预览按当前 **`BILLING_CURRENCY`** 选用 `usd` / `cny` 分支（与导入写入同源）；响应另含顶层 **`billing_currency`**。
+- **行为**：返回 `packages/admin/lib/model-presets/*.json`（合并后）每条预设的摘要（`id`、`display_name`、`vendor`、`kind`、`context_window`、`max_tokens`、`description`、`i18n`、`tier_count`、`pricing_label`、`pricing_preview`），供管理端勾选后再调用 **`POST /admin/models/import`**。`kind` 为 `llm` \| `image` \| `audio`（与管理后台模型列表 Kind 一致）；此处 `audio` **同时包含**语音转写与语音合成，与用户接口 `GET /v1/models?kind=audio` 对齐。英文描述与本地化摘要直接维护在对应的模型预设记录中。价格预览按当前 **`BILLING_CURRENCY`** 选用 `usd` / `cny` 分支（与导入写入同源）；响应另含顶层 **`billing_currency`**。
 
 ### `POST /admin/models/import`
 
@@ -804,10 +857,16 @@ curl -sS "$GATEWAY_URL/v1/images/generations" \
 
 ```json
 {
+  "provider_factor": 0.5,
+  "provider_factor_starts_at": "2026-10-01T00:00:00.000Z",
+  "provider_factor_expires_at": "2026-11-01T00:00:00.000Z",
   "charged_factor": 1.2,
   "metered_factor": 1.0,
   "schedule": {
     "mode": "override",
+    "provider": [
+      { "start": "00:00", "end": "08:00", "factor": 0.4, "validity": { "starts_at": "2026-10-15T00:00:00.000Z", "expires_at": "2026-12-01T00:00:00.000Z" } }
+    ],
     "charged": [
       { "start": "00:00", "end": "24:00", "factor": 1.2, "days": [1, 2, 3, 4, 5] },
       { "start": "00:00", "end": "24:00", "factor": 0.8, "days": [6, 7] }
@@ -820,14 +879,16 @@ curl -sS "$GATEWAY_URL/v1/images/generations" \
 }
 ```
 
-  - `charged_factor` / `metered_factor`：相对**官方当刻价**（阶梯目录价 × 模型 `pricing_profile.schedule` 命中倍率，未命中为 1）的默认倍率（缺省 `1`；`metered_factor` 缺失时可回退读历史 `provider_factor`）；未命中路由分时时段时使用。
-  - `schedule`（可选）：分时窗口，时区为 `system_config.BUSINESS_TIMEZONE`；半开区间 `[start, end)`，仅 `end` 可为 `24:00`；允许跨午夜。可选 `days` 为 ISO 星期数组（`1`=周一 … `7`=周日）；省略表示每天。跨午夜时 `days` 锚定窗口**开始日**（例如周五 `22:00–06:00` 覆盖周五 22:00 至周六 06:00）。窗口在请求进入 Gateway 时锁定，长流式请求跨越边界不会切换倍率。同侧窗口在一周循环上禁止重叠。
-  - **与模型官方时段严格一致**：模型 `pricing_profile.schedule` **为空**时，路由可自由配置时段。模型官方时段**非空**时，路由 `schedule.charged[]` 与 `schedule.metered[]` 的窗口集合必须**各自**与官方窗口逐一相同（`start` / `end` / `days`；空 `days` 与全 7 天等价）。`POST`/`PATCH /admin/routes` 在校验 `price_override` 后按最终 `model_id` 检查。`PATCH /admin/models` 若官方窗口集合变化且新官方时段非空，会把该模型下**所有**（含未激活）且**已配置分时窗口**的路由 `schedule` 重置为同一套窗口（两侧 `factor` 恢复为 `1`），未配置时段的路由保持为空（运行时按 1）。管理后台在模型时段倍率区展示固定说明。
+  - `provider_factor`：供应商倍率（缺省 `1`，`≥ 0`）。可选 `provider_factor_starts_at` / `provider_factor_expires_at`（UTC ISO；Admin 按 `BUSINESS_TIMEZONE` 编辑）。`starts_at` 含、`expires_at` 不含；两端都可省略。未命中供应商时段时使用这组起止时间。不在有效期内，或任一端无法解析时，供应商倍率为 `1`。旧的 `schedule.provider` 窗口未声明 `validity` 时也沿用这组日期，保持原有行为。过期配置留在 JSON 里，不自动删除。计费时刻仍是请求开始时间。
+  - `charged_factor` / `metered_factor`：相对**官方当刻价**（阶梯目录价 × 模型 `pricing_profile.schedule` 命中倍率，未命中为 1）的默认倍率（缺省 `1`）；未命中路由分时时段时使用。有效期内再乘 `provider_factor` 的有效值。
+  - `schedule`（可选）：分时窗口，时区为 `system_config.BUSINESS_TIMEZONE`；半开区间 `[start, end)`，仅 `end` 可为 `24:00`；允许跨午夜。可选 `days` 为 ISO 星期数组（`1`=周一 … `7`=周日）；省略表示每天。跨午夜时 `days` 锚定窗口**开始日**（例如周五 `22:00–06:00` 覆盖周五 22:00 至周六 06:00）。窗口在请求进入 Gateway 时锁定，长流式请求跨越边界不会切换倍率。同侧窗口在一周循环上禁止重叠。`schedule.provider` 与 charged / metered 共用 `schedule.mode`。
+  - `schedule.provider[].validity`（可选）：`{ "starts_at"?: UTC ISO, "expires_at"?: UTC ISO }`，独立配置该时段供应商倍率的有效期。`{}` 表示不限制日期；省略整个字段则继承根级起止时间以兼容旧配置。先按业务时区选中每日时段，再判定该行有效期。未开始或过期时供应商倍率按 `1`，不会回退到基础供应商倍率；该行用户计费与供应成本倍率继续生效。审计中的 `provider_factor.starts_at` / `expires_at` 记录实际选中行的日期。
+  - **与模型官方时段严格一致**：模型 `pricing_profile.schedule` **为空**时，路由可自由配置时段。模型官方时段**非空**时，路由 `schedule.charged[]` 与 `schedule.metered[]` 的窗口集合必须**各自**与官方窗口逐一相同（`start` / `end` / `days`；空 `days` 与全 7 天等价）。`schedule.provider[]` 为空时放行；非空时也必须与官方窗口逐一相同。`POST`/`PATCH /admin/routes` 在校验 `price_override` 后按最终 `model_id` 检查。`PATCH /admin/models` 若官方窗口集合变化且新官方时段非空，会把该模型下**所有**（含未激活）且**已配置分时窗口**的路由 `schedule` 重置为同一套窗口（charged / metered 的 `factor` 恢复为 `1`；仅当原先已有 `schedule.provider` 时才写入 factor 为 `1` 的 provider 窗口），未配置时段的路由保持为空（运行时按 1）。管理后台在模型时段倍率区展示固定说明。
   - `schedule.mode`：
-    - **缺省或 `"multiply"`**（存量）：`charged_cost` = 官方当刻价 × `charged_factor` × 命中窗 `factor`（未命中窗按 `1`）；`metered_cost` 同理。
-    - **`"override"`**（Admin UI 新写入）：命中窗时窗口 `factor` 就是对官方当刻价的倍率；未命中用上方默认 `charged_factor` / `metered_factor`。两侧共享同一套 start/end（及可选 `days`），各写自己的 `factor`。
-  - `standard_cost` = 官方当刻目录价（含模型时段，不含路由倍率）。嵌套 `metered`/`charged` tiers **写入时剥离、运行时忽略**。`pricing_audit` 新写入为 **v5**：`snapshot.standard.schedule` 记录目录时段；supplier / user_charge 侧用 `catalog_schedule` 区分目录时段与路由 `schedule`。`evaluated_at_utc` 记录本次选窗使用的请求开始时刻，并带 `local_weekday`（1–7）。非法 `mode` 或非法 `days` 在 Admin API 写入时拒绝。**历史日志不回补**：上线前写入的 `standard_cost` 仍是裸目录价。
-- **公开列表**：`GET /v1/models` 返回完整 `pricing_profile` 字符串（含 `schedule` 定义，若已配置）；`model_info.input_price` / `output_price` 为 **兼容展示**：取各档中 **最低 `input_price`** 所在档的 in/out，**不含**官方时段。外部自行计算当刻价时须另行约定 `BUSINESS_TIMEZONE`。详见 [user.md「获取模型列表」](user.md)。
+    - **缺省或 `"multiply"`**（存量）：用户侧有效倍率 = 有效期内的供应商倍率 × `charged_factor` × 命中窗 `factor`（未命中窗按 `1`；有效期外供应商倍率为 `1`）；`metered_cost` 同理。
+    - **`"override"`**（Admin UI 新写入）：命中窗时窗口 `factor` 就是该侧对官方当刻价的倍率；未命中用上方默认倍率。三侧共享 `mode`，各写自己的窗口。有效期内再乘供应商倍率。
+  - `standard_cost` = 官方当刻目录价（含模型时段，不含路由倍率，也不乘 `provider_factor`）。`charged_cost` / `metered_cost` = 官方当刻价 × 对应侧有效倍率 × 有效期内的供应商倍率。嵌套 `metered`/`charged` tiers **写入时剥离、运行时忽略**。`pricing_audit` 新写入为 **v6**：`snapshot.standard.schedule` 记录目录时段；supplier / user_charge 的 `effective_factor` 已含供应商倍率，`provider_factor` 记录基础值、是否生效、起止时间和该侧分时。v5 历史行仍可解析。`evaluated_at_utc` 记录本次选窗使用的请求开始时刻，并带 `local_weekday`（1–7）。非法 `mode`、非法 `days`，或 `starts_at` 不早于 `expires_at`，在 Admin API 写入时拒绝。**历史日志不回补**：上线前写入的 `standard_cost` 仍是裸目录价。
+- **公开列表**：`GET /v1/models` 与 `GET /catalog/models` 均返回解析后的 `pricing_profile` 对象（含 `schedule` 定义，若已配置）；`model_info.input_price` / `output_price` 为 **兼容展示**：取各档中 **最低 `input_price`** 所在档的 in/out，**不含**官方时段。外部自行计算当刻价时须另行约定 `BUSINESS_TIMEZONE`。详见 [user.md「获取模型列表」](user.md)。
 
 #### Gateway Admin UI — Model Routes「Billing & Cost」
 
@@ -836,11 +897,14 @@ curl -sS "$GATEWAY_URL/v1/images/generations" \
 | 区块 | 含义 | 数据来源 |
 |------|------|----------|
 | **Standard price** | 官方当刻目录价（只读；含模型官方时段） | `models.pricing_profile`（LLM/Image token/Audio token 的 tiers，或 Image per_image / Audio per_second 的单价块，再乘 `schedule`） |
+| **Provider factor** | 供应商倍率；可选起止时间。有效期内同时乘到用户倍率与成本倍率。标准价不乘。毛利率 `1 − M/C` 与该倍率无关 | `price_override.provider_factor` 及 `provider_factor_starts_at` / `provider_factor_expires_at` |
 | **Charged factor** | 用户侧默认倍率（窗外） | `price_override.charged_factor` |
 | **Metered factor** | 供应侧默认倍率（窗外） | `price_override.metered_factor` |
-| **Schedule** | 共享 start/end 与可选星期，每行 Charged / Metered 倍率（覆盖默认）。模型已配官方时段时窗口只读，只能改两侧倍率 | `price_override.schedule`（`mode: "override"`） |
+| **计费倍率** | 统一展示默认行与时段行。默认行显示“全部时段”或“其他时段”；每行可编辑三侧倍率及独立供应商有效期。模型已配官方时段时 start/end/days 只读 | `price_override.schedule`（`mode: "override"`） |
 
-路由列表卡片展示 **`Ch ×`** / **`M ×`**；有 schedule 时附加 **Sch** 提示。
+编辑旧配置时会将继承的供应商有效期显式保留到每行，之后调整默认行日期不影响其他时段；保存继续使用 `override` 模式。
+
+路由列表卡片展示 **`Ch ×`** / **`M ×`**；配置了供应商倍率时附加 **`P ×`** 及生效中 / 未开始 / 已过期。有 schedule 时附加 **Sch** 提示。公开折扣按目录价 × 有效供应商倍率 × 用户倍率展示。
 
 ---
 
@@ -877,6 +941,11 @@ curl -sS "$GATEWAY_URL/v1/images/generations" \
 
 - **`BILLING_CURRENCY`**：仅允许写入 **`USD`** 或 **`CNY`**（大写）；否则返回 `400` 与 `success: false`。
 - **`ROUTE_STRATEGY`**：仅允许 **`hash_affinity`** \| **`weighted_random`** \| **`weight_priority`** \| **`weighted_round_robin`**（小写）；非法 → `400`。这是全局同层路由策略缺省，模型 `route_policy` 与 `route_pools.strategy` 可覆盖。详见 [route-strategies.md](../reference/route-strategies.md)。Proxy 进程内缓存约 **30s**。
+- **`USER_CHARGED_COST_FACTOR_MODE`**：仅允许 **`multiply`** \| **`min`**（小写）；非法 → `400`。控制 `users.charged_cost_factors` 如何与路由 Charged 有效倍率合成最终用户费用：默认 **`multiply`** 为路由用户计费 × 用户倍率；**`min`** 取两者较小值。用户未配置该模型时两种模式都保持路由价。Proxy 进程内缓存约 **30s**。
+- **`STREAM_FIRST_EVENT_TIMEOUT_MS`**：空 / `0` 关闭；正整数毫秒开启文本流式首个 SSE 事件超时（超时返回 524 并 failover）。覆盖 Chat Completions、Responses、Anthropic Messages、Gemini `streamGenerateContent`。**不**作用于 Images / Audio / Realtime / Tools。未另设 `STREAM_FIRST_EVENT_TIMEOUT_ROUTE_GROUPS` 时只作用于路由组 `default`。Proxy 进程内缓存约 **30s**。
+- **`STREAM_FIRST_EVENT_TIMEOUT_ROUTE_GROUPS`**：空则在超时开启时只作用于 `default`；`*` / `all` 作用于全部路由组；否则为逗号分隔的路由组 id。非法空列表（例如只有逗号）→ `400`。
+
+文本流式空闲 / 记账兜底时长（`STREAM_FIRST_CHUNK_TIMEOUT_MS` / `STREAM_IDLE_TIMEOUT_MS` / `USAGE_SAFETY_TIMEOUT_MS`）是代理服务**部署环境变量**，不在本接口。见 [streaming-billing.md](../reference/streaming-billing.md)。
 
 Agent Tools 也通过该接口维护配置：
 
@@ -971,7 +1040,7 @@ Admin UI 登录后由 `BusinessTimezoneProvider` 调用，用于时间列展示�
 
 响应：`{ success, data: [...], tags: string[] }`（`tags` 为库内全部 distinct 标签，供筛选 UI）。
 
-`data` 每行除用量/成本/可靠性字段外，含 TTFT 聚合（来自 `api_key_request_logs.first_reasoning_token_ms` / `first_token_ms`）：
+`data` 每行除用量、成本与可靠性字段外，含缓存、TTFT 与质量聚合。TTFT 来自 `api_key_request_logs.first_reasoning_token_ms` / `first_token_ms`：
 
 | 字段 | 说明 |
 |------|------|
@@ -983,6 +1052,12 @@ Admin UI 登录后由 `BusinessTimezoneProvider` 调用，用于时间列展示�
 | `avg_reasoning_phase_ms` | reasoning → content 过渡阶段平均时长（两者均非空时） |
 | `reasoning_ttft_rate` | 含 reasoning TTFT 的请求占比（%） |
 | `content_ttft_rate` | 含 content TTFT 的请求占比（%） |
+| `failover_request_count` | `upstream_failover_count > 0` 的请求数 |
+| `failover_request_rate` | 上述请求数 / 总请求数 × 100，范围 0–100% |
+| `stream_sample_count` | `status = success` 且 `stream_duration_ms > 0` 的样本数 |
+| `stream_tokens_per_second` | 仅在上述样本上计算 `SUM(output_tokens) * 1000 / SUM(stream_duration_ms)`；无样本为 `null` |
+
+`failover_rate` 仍是转移事件数 / 请求数 × 100，可能超过 100%。`tokens_per_second` 仍按全部有流式时长的请求聚合。新接入方应使用上表中的请求占比和流式样本字段。D1、Postgres 与 MySQL 口径一致。
 
 ### `GET /admin/analytics/providers`
 
@@ -992,7 +1067,7 @@ Admin UI 登录后由 `BusinessTimezoneProvider` 调用，用于时间列展示�
 | `tag` | 可选；非空时只统计带该 `model_tags.tag` 的模型 |
 | `model_id` / `route_group` | 可选；钻取过滤 |
 
-响应：`{ success, data: [...], tags: string[] }`；`data` 行字段与 **models** 分析相同（含上表 TTFT 聚合列），按 `provider_id` 分组。
+响应：`{ success, data: [...], tags: string[] }`；`data` 行字段与 **models** 分析相同（含上表 TTFT 与质量字段），按最终 `provider_id` 分组。未归属供应商的请求不计入；重试链中的前序失败也不拆成独立样本，因此这里的成功率不是上游逐次尝试可用率。
 
 ### `GET /admin/analytics/users`
 
@@ -1000,6 +1075,8 @@ Admin UI 登录后由 `BusinessTimezoneProvider` 调用，用于时间列展示�
 |----------|------|
 | `start_date` / `end_date` | 同上 |
 | `email` | 可选，`user_email` **模糊**匹配（`LIKE %...%`） |
+
+`data` 另含 `success_count`（`status = success` 的请求数）。`budget_*` 与 `wallet_*` 是账户当前值，不是所选区间的历史余额。用户按日志中的 `user_email` 聚合。
 
 ### `GET /admin/analytics/keys`
 
@@ -1019,3 +1096,7 @@ Admin UI 登录后由 `BusinessTimezoneProvider` 调用，用于时间列展示�
 | `start_date` / `end_date` | 同上 |
 
 响应 `data`：`providers`（按 `provider_id`）、`modelProviders`（按 `model_id` + `provider_id`）、`recentErrors`。
+
+`providers` 与 `modelProviders` 另含 `failover_request_count`、`failover_request_rate`；`failover_rate` 含义不变。归属规则与供应商用量相同：按日志最终 `provider_id` 统计，不代表上游逐次尝试可用率。
+
+`recentErrors` 为所选区间（仍受 180 天上限约束）内最近 10 条 `status = error` 日志，字段与全局请求日志相同。

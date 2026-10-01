@@ -1,4 +1,8 @@
 {
+	"responsive": {
+		"filters": "筛选条件",
+		"activeFilters": "已选 {count} 项"
+	},
 	"locale": {
 		"label": "语言",
 		"en": "English",
@@ -114,6 +118,8 @@
 		"logout": "退出登录"
 	},
 	"sidebar": {
+		"openMenu": "打开导航菜单",
+		"navigation": "主导航",
 		"groups": {
 			"overview": "概览",
 			"inference": "推理",
@@ -324,6 +330,8 @@
 		"vendorAria": "模型厂商筛选",
 		"provider": "供应商",
 		"providerAria": "供应商筛选",
+		"providerType": "供应商类型",
+		"providerTypeAria": "供应商类型筛选",
 		"routeGroup": "路由组",
 		"routeGroupAria": "路由组筛选",
 		"modelsAndRoutes": "{models} 个模型 · {routes} 条路由",
@@ -428,20 +436,54 @@
 			"failed": "导入失败",
 			"copyFailed": "复制 API Key 失败"
 		},
+		"quota": {
+			"action": "查询额度",
+			"title": "供应商额度",
+			"close": "关闭",
+			"loading": "正在查询…",
+			"retry": "再次查询",
+			"checkedAt": "查询时间 {time}",
+			"balance": "余额",
+			"granted": "赠送",
+			"paid": "充值",
+			"windows": "周期额度",
+			"remaining": "剩余 {value}",
+			"usedOfLimit": "{used} / {limit}",
+			"resetsAt": "重置于 {time}",
+			"empty": "没有返回余额或额度",
+			"failed": "查询失败",
+			"state": {
+				"ok": "可用",
+				"low": "偏低",
+				"exhausted": "已用尽",
+				"unknown": "未知"
+			},
+			"window": {
+				"key_limit": "Key 额度",
+				"spend_limit": "消费上限",
+				"5h": "5 小时",
+				"weekly": "每周",
+				"monthly": "每月"
+			}
+		},
+		"kind": {
+			"custom": "自定义",
+			"unclassified": "未分类"
+		},
 		"outbound": {
 			"go": "点击前往"
 		},
 		"modal": {
 			"editTitle": "编辑供应商",
 			"newTitle": "新建供应商",
-			"prefilledFrom": "已从 {id} 预填。设置新 ID 并在保存前检查各字段。",
-			"general": "基本信息",
-			"generalHint": "显示名称及可选自定义 ID（仅新建供应商）。",
-			"id": "ID",
-			"idPlaceholder": "可选：自定义 ID（留空则自动生成）",
-			"idHint": "留空将自动生成 UUID",
+			"prefilledFrom": "已从 {id} 预填。保存前请检查各字段。",
 			"nameRequired": "名称 *",
-			"namePlaceholder": "例如 OpenAI",
+			"namePlaceholder": "例如 谷云",
+			"kind": "类型",
+			"kindRequired": "类型 *",
+			"kindPlaceholder": "选择供应商类型",
+			"kindHint": "不同类型下可以使用相同的账号别名。选择类型只决定图标和展示，不会改写端点。",
+			"kindRequiredError": "请选择供应商类型",
 			"endpoints": "端点",
 			"endpointsHint": "每个协议填 Base URL 表示具备全部能力。非标准路径可展开覆盖；若要限制能力范围，请清空 Base，只填写支持的覆盖 URL。",
 			"endpointsTabsAria": "端点协议",
@@ -454,7 +496,7 @@
 			"openaiPlaceholder": "https://api.openai.com/v1",
 			"anthropicPlaceholder": "https://api.anthropic.com",
 			"geminiPlaceholder": "https://generativelanguage.googleapis.com/v1beta/models",
-			"geminiHint": "'{model}' 之前的完整路径前缀。Developer：…/v1beta/models；Vertex Express：…/v1/publishers/google/models；正式 Vertex：…/v1/projects/{project}/locations/{location}/publishers/google/models。",
+			"geminiHint": "'{model}' 之前的完整路径前缀。Developer：…/v1beta/models；Vertex Express：…/v1/publishers/google/models；正式 Vertex：…/v1/projects/'{project}'/locations/'{location}'/publishers/google/models。",
 			"geminiAuth": "上游鉴权",
 			"geminiAuthAuto": "默认（?key=）",
 			"geminiAuthQueryKey": "Query key（?key=）",
@@ -494,7 +536,7 @@
 			"apiKeyPlaceholder": "sk-…",
 			"apiKeyEditPlaceholder": "留空则保持原密钥",
 			"apiKeyHint": "该供应商的上游凭证。项目级 Vertex 请粘贴 GCP 服务账号 JSON（不要填 Vertex API Key）。",
-			"apiKeyEditHint": "留空保持当前密钥；填写新值则替换。",
+			"apiKeyEditHint": "默认隐藏当前密钥。可查看或复制。修改后保存即替换；清空则保持原密钥。",
 			"capModelsGenerate": "models.generate (/v1beta/models/'{model}:{action}') — 流式 + 非流式",
 			"legacyPerActionNotice": "该 Provider 仍保留无法安全合并的 generateContent / streamGenerateContent 覆盖项。保存时原样写回。复核后可改为单一 '{action}' 模板。"
 		}
@@ -582,6 +624,8 @@
 		"modal": {
 			"editTitle": "编辑模型",
 			"newTitle": "新建模型",
+			"prefilledFrom": "已从 {id} 预填。Model ID 已加上 -copy 后缀，保存前请确认。",
+			"copyDisplayName": "{name}（副本）",
 			"kind": "类型",
 			"kindLlm": "大语言模型",
 			"kindImage": "文生图",
@@ -610,12 +654,12 @@
 			"pricingProfile": "定价配置",
 			"viewPricingProfileJson": "查看定价配置 JSON",
 			"hidePricingProfileJson": "收起 JSON",
-			"standardPricing": "标准价格",
-			"catalogSchedule": "时段倍率",
+			"standardPricing": "刊例价 / 目录价",
+			"catalogSchedule": "目录时段倍率",
 			"catalogScheduleHint": "时段变化时会重置关联路由的时段倍率。",
 			"catalogScheduleEmpty": "暂无时段配置",
 			"addCatalogScheduleWindow": "添加窗口",
-			"catalogScheduleFactor": "倍率",
+			"catalogScheduleFactor": "目录倍率",
 			"imageTokenPricing": "Image token 单价",
 			"audioPricing": "音频定价",
 			"audioBillingMode": "计费模式",
@@ -666,6 +710,12 @@
 		"empty": "未找到模型或路由",
 		"emptyFilteredPrefix": "请尝试调整筛选或",
 		"workspace": {
+			"searchPlaceholder": "搜索模型、上游模型或供应商…",
+			"removeFilter": "移除筛选：{filter}",
+			"densityLabel": "路由详情展示",
+			"densityCompact": "精简",
+			"densityDetailed": "详细",
+			"surfaceCounts": "{models} 个模型 · {routes} 条路由",
 			"title": "路由配置",
 			"filteredBy": "筛选条件：{summary}",
 			"allModelsRoutes": "全部模型与路由",
@@ -739,16 +789,72 @@
 			"scheduled": "Schedule",
 			"customParams": "P",
 			"customParamsTooltip": "自定义请求参数：请求体深度合并，已配置的请求头作为 HTTP 头发送。默认客户端同名字段与同名头优先，开启强制覆盖后路由值优先。",
+			"pricingPeriod": "时段",
+			"effectivePricing": {
+				"charged": "实际计费",
+				"metered": "实际成本",
+				"guide": {
+					"title": "时段与实际倍率",
+					"periodTitle": "时段怎么读",
+					"periodBody": "按时间和星期匹配；未命中指定时段时使用「其他时段」，未配置时段时使用「全部时段」。",
+					"currentBody": "「当前」仅表示此刻命中的时段，不代表路由或供应商已启用。",
+					"timezone": "业务时区：{timezone}",
+					"factorTitle": "两列数字是什么",
+					"factorBody": "展示已合成供应商倍率的结果，不是金额。",
+					"chargedFormula": "实际计费倍率 = 生效的供应商倍率 × 计费倍率",
+					"meteredFormula": "实际成本倍率 = 生效的供应商倍率 × 成本倍率",
+					"validityTitle": "供应商有效期怎么算",
+					"validityBody": "各行均按当前日期预览。供应商倍率未开始或已到期时按 ×1 计算；时钟图标提示该倍率当前未生效。",
+					"scopeTitle": "倍率相对于什么价格",
+					"scopeBody": "以该时段刊例价为基准；刊例价已含目录时段倍率，无需重复乘入。这里不含用户专属倍率，也不是最终账单金额。",
+					"hint": "悬浮具体倍率，可查看计算过程与有效期。"
+				},
+				"chargedFormula": "实际计费倍率：供应商 {provider} × 计费 {configured} = {effective}",
+				"meteredFormula": "实际成本倍率：供应商 {provider} × 成本 {configured} = {effective}",
+				"inactiveProvider": "供应商倍率当前不生效，计算时按 ×1。",
+				"invalidValidity": "有效期无效",
+				"breakdown": {
+					"applied": "已合成供应商倍率",
+					"notApplied": "供应商倍率未生效 · 按 ×1 计算",
+					"standard": "供应商倍率为 ×1",
+					"validity": "供应商倍率有效期",
+					"unlimited": "不限时间",
+					"basis": "相对于该时段刊例价；不含用户专属倍率。各行按当前日期预览。",
+					"marker": "紫点表示已合成非 ×1 的供应商倍率；无紫点时按 ×1 计算。"
+				}
+			},
+			"pricingCharged": "计费倍率",
+			"pricingMetered": "成本倍率",
+			"basePricing": "基础倍率",
+			"targetParams": "参数",
+			"targetWeight": "权重 {value}",
 			"badgeWeightTooltip": "权重：{value}",
 			"badgeParamsTooltip": "自定义参数（请求体深度合并与 HTTP 头；默认客户端同名值优先）",
 			"badgeParamsForceOverrideTooltip": "自定义参数已开启强制覆盖（路由请求体字段与请求头优先）",
-			"badgeChargedTooltip": "计费：{value} · {status}",
-			"badgeMeteredTooltip": "成本：{value} · {status}",
+			"badgeChargedTooltip": "计费倍率：{value} · {status}（未合成供应商倍率）",
+			"badgeMeteredTooltip": "成本倍率：{value} · {status}（未合成供应商倍率）",
 			"badgeScheduleTooltip": "时段：{windows}",
 			"badgeScheduleBothTooltip": "计费时段：{charged} · 成本时段：{metered}",
 			"providerDisabled": "供应商停用",
 			"editRoute": "编辑此路由",
-			"stickyBoundUsersTooltip": "此供应商当前 Sticky 有效用户数：{count}"
+			"stickyBoundUsersTooltip": "此供应商当前 Sticky 有效用户数：{count}",
+			"stickyUsage": {
+				"label": "粘性绑定用户",
+				"share": "组内占比 {percent}",
+				"shareLabel": "本路由组内的粘性绑定占比",
+				"empty": "暂无绑定",
+				"unavailable": "数据未就绪",
+				"retained": "停用后仍有绑定",
+				"off": "粘性未开启",
+				"offTooltip": "此路由组未开启粘性，不统计绑定用户。",
+				"tooltip": "统计本路由组内未过期的粘性绑定用户；横条表示组内占比。绑定人数不代表实时并发或请求量。"
+			},
+			"providerFactorBadge": "供应商倍率 {value} · {status}",
+			"providerFactorTiming": {
+				"scheduled": "未开始",
+				"active": "生效中",
+				"expired": "已过期"
+			}
 		},
 		"vendor": {
 			"label": "模型厂商",
@@ -785,15 +891,15 @@
 			"routeEnabled": "路由已启用（取消勾选以禁用）",
 			"routeDisabled": "路由已禁用（勾选以启用）",
 			"priorityTitle": "优先级（故障转移顺序）",
-			"factorsAria": "计费与计量目录系数",
-			"chargedFactorAria": "计费系数 {value}：{status}",
-			"meteredFactorAria": "计量系数 {value}：{status}",
+			"factorsAria": "路由配置倍率（未合成供应商倍率）",
+			"chargedFactorAria": "计费倍率 {value}：{status}",
+			"meteredFactorAria": "成本倍率 {value}：{status}",
 			"scheduleBadge": "时段",
 			"scheduleAria": "分时时段：{windows}",
-			"chargedTooltip": "计费系数：{value} · {status} · 相对官方当刻价的客户计费乘数",
-			"meteredTooltip": "计量系数：{value} · {status} · 相对官方当刻价的供应商成本乘数",
+			"chargedTooltip": "计费倍率：{value} · {status}。配置值，尚未乘供应商倍率或合成用户专属倍率。",
+			"meteredTooltip": "成本倍率：{value} · {status}。配置值，尚未乘供应商倍率。",
 			"baseInversionBadge": "倒挂",
-			"baseInversionTooltip": "基础计费系数低于基础成本系数，可能存在利润倒挂；时段系数未计入此判断",
+			"baseInversionTooltip": "默认计费倍率低于默认成本倍率；这是配置倍率比较，未计入供应商有效期、其他时段及用户专属倍率。",
 			"factorStatus": {
 				"charged": {
 					"invalid": "无效配置",
@@ -816,6 +922,57 @@
 			}
 		},
 		"modal": {
+			"editor": {
+				"sections": "路由配置分区",
+				"tabs": {
+					"mapping": "基础路由",
+					"request": "请求参数",
+					"pricing": "计费规则",
+					"test": "快速测试"
+				},
+				"configured": "已配置",
+				"headerCount": "{count} 个请求头",
+				"requestDefault": "使用客户端原始请求",
+				"pricingSummary": "计费倍率 ×{charged} · 成本倍率 ×{metered} · {count} 个时段",
+				"requestHint": "按需为此路由补充请求头和请求体参数。默认保留客户端传入的值；开启强制覆盖后，以这里的配置为准。",
+				"adapterManaged": "由协议适配器自动匹配",
+				"effectivePrices": "查看本时段价格明细",
+				"scheduleInherited": "时段与星期继承模型设置；倍率与供应商有效期可按行配置。",
+				"requiredFields": "请选择模型、供应商，并填写供应商模型名称。",
+				"adapterHint": "选择适配器后，将自动匹配两端协议与端点。",
+				"mappingTitle": "模型映射",
+				"mappingDescription": "指定客户端请求的模型，以及实际承接请求的上游。",
+				"routingTitle": "路由规则",
+				"headersDescription": "随请求发送至上游的 HTTP 请求头。",
+				"headersEmpty": "暂无自定义请求头，点击右上角添加。",
+				"bodyDescription": "以 JSON 对象补充上游请求参数。",
+				"pricingTimezone": "倍率基于模型目录价计算 · 时区 {timezone}",
+				"chargedFactorLabel": "计费倍率",
+				"meteredFactorLabel": "成本倍率",
+				"factorHelpLabel": "{name}说明",
+				"providerFactorHelp": "供应商提供的折扣或加价，同时作用于用户计费和供应成本。\n例如填 0.8，两侧均按 8 折计算；填 1 表示不调整。有效期外按 ×1。",
+				"chargedFactorHelp": "用于计算向用户收取的费用，不影响供应成本。\n实际计费倍率 = 供应商倍率 × 计费倍率。\n例如 0.8 × 0.5 = 0.4，即按该时段目录价的 4 折计费。\n此处为路由预览，未合成用户专属倍率。",
+				"meteredFactorHelp": "用于计算供应商侧成本，不影响向用户收取的费用。\n实际成本倍率 = 供应商倍率 × 成本倍率。\n例如 0.8 × 0.3 = 0.24；填 0 表示按零成本记录。",
+				"effectiveFactor": "实际",
+				"effectiveFactorHint": "实际倍率 = 当前生效的供应商倍率 × 本项倍率；不含目录时段倍率。",
+				"providerInactive": "有效期外，按 ×1",
+				"catalogFactor": "目录倍率",
+				"catalogPricesHint": "表中单价已包含该时段目录倍率。",
+				"billingFactors": "计费倍率",
+				"billingFactorsHint": "用户计费与供应成本分别计算，供应商倍率同时作用于两者。",
+				"period": "时段",
+				"allPeriods": "全部时段",
+				"otherPeriods": "其他时段",
+				"allPeriodsHint": "每天全天适用",
+				"otherPeriodsHint": "未命中下方时段时",
+				"configuredValidity": "已设有效期",
+				"rowValidityHint": "仅影响本行的供应商倍率。有效期外按 ×1，留空表示不限。时区 {timezone}。",
+				"pricesAtCurrentDate": "按当前日期检查本时段的供应商有效期，未生效或已过期时按 ×1 预览。",
+				"defaultFactors": "基础倍率",
+				"defaultFactorsHint": "用户计费与供应成本分别计算，供应商倍率同时作用于两者。",
+				"providerValidity": "供应商倍率有效期",
+				"unlimited": "不限时间"
+			},
 			"editTitle": "编辑路由",
 			"newTitle": "新建路由",
 			"prefilledFrom": "已从路由 {id} 预填。保存前请检查各字段。",
@@ -874,7 +1031,7 @@
 			"pricingSection": "用户计费与供应成本",
 			"viewPriceOverrideJson": "查看 price_override JSON",
 			"hidePriceOverrideJson": "收起 JSON",
-			"standardCatalog": "标准（目录）",
+			"standardCatalog": "刊例价 / 目录价",
 			"standardCatalogHint": "只读目录价。",
 			"standardCatalogHintImage": "只读目录 Token 单价。实际扣费按上游图片用量 × 这些单价计算。",
 			"noCatalogPricing": "该模型没有目录价。",
@@ -885,20 +1042,20 @@
 			"imageTokenResolveHint": "扣费权威：上游 Images usage × 档位 token 单价。",
 			"imageTokenRates": "Image token 单价",
 			"protocolHintImageOpenaiOnly": "文生图模型对外协议固定为 openai；上游可以是 OpenAI 透传，也可以是 DashScope 转换。",
-			"chargedCost": "用户计费",
-			"chargedCostHint": "相对官方当刻价（目录价 × 官方时段）的倍率。",
+			"chargedCost": "计费单价",
+			"chargedCostHint": "时段目录单价 × 实际计费倍率，未合成用户专属倍率。",
 			"factor": "倍率",
-			"chargedFactorTitle": "相对官方当刻价的用户侧倍率，默认 1。",
-			"meteredCost": "供应成本",
-			"meteredCostHint": "相对官方当刻价（目录价 × 官方时段）的倍率。",
-			"meteredFactorTitle": "相对官方当刻价的供应侧倍率，默认 1。",
+			"chargedFactorTitle": "计费倍率，默认 1；需与生效的供应商倍率相乘。",
+			"meteredCost": "成本单价",
+			"meteredCostHint": "时段目录单价 × 实际成本倍率。",
+			"meteredFactorTitle": "成本倍率，默认 1；需与生效的供应商倍率相乘。",
 			"pricingFormulaHint": "时间窗内的请求覆盖上方默认倍率。可选星期，用于区分工作日与周末。",
 			"dailySchedule": "时段倍率",
-			"catalogOfficialSchedule": "标准时段倍率",
+			"catalogOfficialSchedule": "目录时段倍率",
 			"catalogScheduleLockedHint": "来自模型厂商，只读；右侧只能改路由倍率",
 			"catalogEffectiveNow": "当前时段倍率：×{factor}",
 			"catalogScheduleNow": "当前",
-			"catalogWindowPricesHint": "目录价 × 本时段官方倍率",
+			"catalogWindowPricesHint": "目录单价 × 目录时段倍率",
 			"billingTimezoneHint": "时段窗口使用业务时区 {timezone}（半开区间 [start, end)；end 可为 24:00）。可选星期，将窗口限制在所选日期。",
 			"addScheduleWindow": "添加窗口",
 			"scheduleEmpty": "暂无时段配置",
@@ -917,9 +1074,9 @@
 			"weekdaySun": "日",
 			"scheduleFactor": "时段倍率",
 			"scheduleChargedFactor": "计费倍率",
-			"scheduleMeteredFactor": "供应倍率",
-			"scheduleWindowPricesSide": "口径",
-			"scheduleWindowPricesHint": "目录价 × 官方时段 × 本行倍率。",
+			"scheduleMeteredFactor": "成本倍率",
+			"scheduleWindowPricesSide": "单价类型",
+			"scheduleWindowPricesHint": "时段目录单价 × 实际计费／成本倍率；未合成用户专属倍率。",
 			"requestDefaults": "请求默认值（JSON）",
 			"requestDefaultsHint": "深度合并到上游请求体；客户端字段优先。可选 headers 对象作为 HTTP 头发送。",
 			"customParams": "自定义参数",
@@ -927,8 +1084,8 @@
 			"customHeaders": "HTTP 请求头",
 			"customHeadersHint": "作为上游请求头发送；客户端同名头优先。不进入 JSON 请求体。",
 			"customHeadersHintForceOverride": "作为上游请求头发送；路由值覆盖客户端同名头。不进入 JSON 请求体。",
-			"customHeadersName": "Name",
-			"customHeadersValue": "Value",
+			"customHeadersName": "名称",
+			"customHeadersValue": "值",
 			"customHeadersAdd": "添加请求头",
 			"customHeadersRemove": "删除请求头",
 			"customHeadersNamePlaceholder": "HTTP-Referer",
@@ -951,7 +1108,70 @@
 			"audioMinimumCharacters": "最低字符数",
 			"weight": "权重",
 			"weightHint": "同 priority 层内权重（≥ 1）。加权策略下数值越大流量越多。",
-			"operationModelsGenerate": "models.generate · Generate Content（流式 + 非流式）"
+			"operationModelsGenerate": "models.generate · Generate Content（流式 + 非流式）",
+			"providerFactor": "供应商倍率",
+			"providerFactorHint": "供应商倍率在有效期内同时调整计费金额与成本金额；目录价不变。时间按 {timezone}。",
+			"providerFactorTitle": "供应商倍率，默认 1。不在有效期内按 1 计。",
+			"providerFactorStarts": "开始",
+			"providerFactorExpires": "结束",
+			"scheduleProviderFactor": "供应商倍率",
+			"quickTest": {
+				"hint": "使用当前未保存的模型映射与自定义参数直连供应商，不经过网关计费与路由分流。",
+				"request": "测试请求",
+				"requestHint": "按上游协议生成示例，可直接修改 JSON。",
+				"reset": "重置示例",
+				"draft": "无需保存路由",
+				"send": "发送测试",
+				"stop": "停止",
+				"sending": "正在接收响应…",
+				"stopped": "测试已停止，已接收的内容保留。",
+				"response": "测试结果",
+				"responseHint": "正文、推理和工具调用分区实时展示。",
+				"empty": "发送测试后，在这里查看响应",
+				"invalidJson": "请输入有效的 JSON 对象。",
+				"missingFields": "请先在「基础路由」中选择模型、供应商并填写供应商模型名称。",
+				"realtimeHint": "实时语音需要 WebSocket 会话，请在完整调试台中测试。",
+				"failed": "测试失败，请重试。",
+				"stale": "配置或请求已修改，以下为上次测试结果。",
+				"latency": "首包 {ms} ms",
+				"preview": "查看预览",
+				"raw": "原始响应",
+				"actualRequest": "实际请求",
+				"audioFile": "测试音频",
+				"imageFiles": "参考图片",
+				"binaryAudio": "响应为音频文件，请切换至预览播放。",
+				"decodeFailed": "无法解码实际请求体。",
+				"template": "测试模板",
+				"templateCustom": "自定义请求",
+				"templates": {
+					"connectivity": "连通测试",
+					"tools": "工具调用",
+					"reasoning": "推理测试"
+				},
+				"streaming": "流式响应",
+				"toolCalls": "工具调用",
+				"toolArguments": "工具参数",
+				"receivingTool": "正在接收工具名称…",
+				"toolHint": "仅展示模型生成的调用与参数，不执行工具。",
+				"upstreamError": "上游错误",
+				"finished": "响应结束",
+				"waiting": "等待上游响应…",
+				"waitingParts": "已收到数据，等待正文或工具内容…",
+				"noReadableParts": "未提取到正文或工具内容，可查看下方流数据。",
+				"finishReason": "结束原因",
+				"hideRaw": "收起原始响应",
+				"streamData": "流式 data",
+				"streamDataHint": "与预览同步更新；向上滚动可暂停跟随。",
+				"events": "{count} 个数据事件",
+				"streamEmpty": "发送流式请求后，数据将在这里逐步显示。",
+				"requestPreview": "发送前预览",
+				"sentRequest": "已发送",
+				"requestPreviewHint": "预览合并后的请求体，最终以服务端发出的内容为准。",
+				"sentRequestHint": "本次上游请求的真实内容，已合并路由参数。",
+				"lastRequestHint": "配置已修改，以下保留上一次实际发出的请求。",
+				"requestHeaders": "请求头",
+				"actualRequestEmpty": "发送后展示实际请求内容。"
+			}
 		},
 		"kindAudio": "音频",
 		"strategy": {
@@ -1263,7 +1483,7 @@
 		"routingPool": "路由池",
 		"publicSurfaces": "公开入口",
 		"customParams": "custom_params",
-		"priceOverride": "price_override",
+		"priceOverride": "路由定价配置（JSON）",
 		"selectedDetails": "ID、路由池与 JSON 字段",
 		"receiving": "接收中…",
 		"cannotExtractBody": "无法从报文提取正文。",
@@ -1444,7 +1664,7 @@
 			"rateLimit": "限流规则",
 			"rateLimitRpmValue": "{rpm} RPM",
 			"metadata": "元数据",
-			"chargedCostFactors": "模型折扣",
+			"chargedCostFactors": "用户专属倍率",
 			"created": "创建时间",
 			"updated": "更新时间",
 			"group": "分组"
@@ -1461,7 +1681,7 @@
 			"walletSpent": "总消费",
 			"walletBalance": "当前余额",
 			"metadataJsonObject": "元数据（JSON 对象）",
-			"chargedCostFactors": "模型折扣",
+			"chargedCostFactors": "用户专属倍率",
 			"chargedCostFactorModelId": "模型 ID",
 			"chargedCostFactorValue": "倍率",
 			"externalSystem": "外部系统",
@@ -1486,11 +1706,11 @@
 			"metadataReplace": "保存会替换整个 metadata 对象。留空则保持当前值不变。",
 			"rateLimitRpm": "该用户所有 Key 合计的每 60 秒滚动窗口请求数。留空表示不限；0 拒绝所有计次请求。GET /v1/me 不计入。单把 Key 的额外上限在下方密钥表中设置。",
 			"rateLimitRpmInvalid": "限流必须是非负整数，或留空表示不限。",
-			"chargedCostFactors": "从目录中选择模型后设置倍率。在路由 Charged cost 算完后再乘。未配置的模型金额不变；0 表示该模型不扣费。仅 LLM / Images / Audio，不含 Agent Tools。"
+			"chargedCostFactors": "用户专属倍率与路由实际计费倍率按全局模式合成（相乘或取较小值），不影响成本金额。未配置时沿用路由计费；0 表示该模型不收费。适用于 LLM、图像和音频，不含 Agent Tools。"
 		},
 		"chargedCostFactors": {
 			"none": "未设置 Charged cost factors。",
-			"empty": "未设置按模型倍率。将按目录价与路由 Charged cost 原样扣费。",
+			"empty": "未设置用户专属倍率，按路由实际计费倍率收费。",
 			"pickTitle": "添加目录模型",
 			"pickSearch": "搜索模型…",
 			"pickEmpty": "没有匹配的模型。",
@@ -1655,7 +1875,7 @@
 			"route": "路由",
 			"tags": "标签",
 			"usage": "用量",
-			"cost": "成本（{currency}）",
+			"cost": "计费 / 成本（{currency}）",
 			"profit": "毛利（{currency}）"
 		},
 		"identity": {
@@ -1701,17 +1921,17 @@
 				"reasoning": "含推理 Token 或推理阶段 TTFT",
 				"failover": "上游尝试失败后发生了切换"
 			},
-			"cost": "计费（C）与供应成本（M）；标准目录价可在详情中查看",
-			"profit": "计费 − 计量（单请求）",
+			"cost": "本次请求的计费金额与成本金额；旁边倍率为金额 ÷ 目录金额。",
+			"profit": "计费金额 − 成本金额；不含基础设施、税费等其他支出。",
 			"rowDetail": "点击显示或隐藏定价审计、请求体与用量报文",
 			"inputOutputTokens": "输入 / 输出 Token",
 			"imagePerImageUsage": "按张计费：参考图 × 生成图张数",
 			"audioPerSecondUsage": "计费音频时长（按秒计费）",
 			"audioPerCharacterUsage": "语音合成计费字符数",
 			"cacheTokens": "Cache read / cache write Token",
-			"standardCatalogPrice": "标准价（官方当刻价）",
-			"chargedUserBudget": "计费",
-			"meteredSupplierCost": "计量（供应成本）",
+			"standardCatalogPrice": "目录金额（本次用量 × 当时目录单价）",
+			"chargedUserBudget": "计费金额",
+			"meteredSupplierCost": "成本金额",
 			"unknown": "未知"
 		},
 		"detail": {
@@ -1875,9 +2095,10 @@
 			"title": "供应商用量",
 			"subtitle": "按上游供应商统计用量与成本"
 		},
+		"deletedProvider": "已删除",
 		"userUsage": {
 			"title": "用户用量",
-			"subtitle": "按请求日志 email 的用量与成本；额度列来自 users（通过 user_id JOIN）。"
+			"subtitle": "按邮箱查看区间用量与成本，以及账户当前预算。"
 		},
 		"reliability": {
 			"title": "可靠性",
@@ -1919,7 +2140,9 @@
 			"budgetUsage": "周期额度使用",
 			"wallet": "永久额度",
 			"errors": "错误",
-			"modelProvider": "模型 / 供应商"
+			"modelProvider": "模型 / 供应商",
+			"providerKind": "供应商类型",
+			"providerAccount": "供应商账号"
 		},
 		"loadingProviderUsage": "加载供应商用量中...",
 		"noProviderUsageForModel": "所选时间范围内该模型无供应商用量。",
@@ -1929,14 +2152,57 @@
 		"noData": "无数据",
 		"rangeTotals": {
 			"rangeTotal": "范围合计",
-			"standard": "标准",
-			"charged": "计费",
-			"metered": "成本"
+			"standard": "目录金额",
+			"charged": "计费金额",
+			"metered": "成本金额"
 		},
 		"tokenDisplay": {
 			"label": "Token 显示",
 			"compact": "紧凑（K/M/B）",
 			"numeric": "数字"
+		},
+		"insights": {
+			"summary": "筛选范围汇总",
+			"requests": "请求数",
+			"successRate": "整体成功率",
+			"errors": "失败请求",
+			"charged": "计费金额",
+			"metered": "成本金额",
+			"margin": "扣费 − 成本",
+			"definitions": "统计范围与指标口径",
+			"costNote": "目录金额合计：{standard}。计费金额与成本金额的差额仅反映已记录的计费价差，未扣除基础设施、税费及未记录成本。",
+			"qualityNote": "整体成功率按请求数加权。转移请求占比按“至少发生一次转移”的请求计算（0–100%）。生成速度仅统计成功且流式时长有效的样本；缺少测量显示 —。缓存命中率为缓存读取 Token / 输入 Token。 平均延迟沿用日志中所有有测量值的请求，包含失败或取消。",
+			"budgetNote": "预算与钱包显示账户当前状态，并非所选历史区间的余额；用户按日志中的邮箱聚合。",
+			"search": "搜索模型、供应商或邮箱",
+			"view": "分析视图",
+			"matching": "匹配 {count} 行 · 汇总和 CSV 随筛选变化",
+			"loadError": "分析数据加载失败，请重试以获取当前范围的数据。",
+			"retry": "重试",
+			"detailError": "明细加载失败，请收起后重新展开重试。",
+			"scope": {
+				"models": "所选区间按模型与路由组聚合；不包含未记录模型的请求。",
+				"providers": "按请求日志最终归属的供应商统计；前序失败尝试不作为独立样本，不能直接代表上游尝试可用率。不包含未归属供应商的请求。",
+				"users": "所选区间按日志邮箱聚合；不包含未记录邮箱的请求。",
+				"reliability": "统计供应商最终请求结果，不是每次上游尝试。按失败量、请求量排序；小样本结论需要更多观察。"
+			},
+			"views": {
+				"overview": "概览",
+				"cost": "费用与用量",
+				"performance": "性能与质量",
+				"budget": "当前预算",
+				"all": "全部指标"
+			},
+			"rangeErrors": "所选区间近期错误",
+			"failoverShare": "转移请求占比",
+			"streamSpeed": "流式 Token/秒",
+			"outcomes": "成功 {success} · 失败 {errors} · 未完成 / 取消 {other}",
+			"streamSamples": "{count} 个流式样本"
+		},
+		"providerDimensions": {
+			"all": "全部类型",
+			"unknown": "类型未知",
+			"gatewayTools": "网关工具",
+			"noMatchingKind": "该类型暂无数据"
 		}
 	},
 	"adminApiKeys": {
@@ -1959,13 +2225,17 @@
 		"activate": "激活",
 		"deactivate": "吊销",
 		"empty": "暂无集成密钥",
-		"status": { "active": "有效", "revoked": "已吊销" }
+		"status": {
+			"active": "有效",
+			"revoked": "已吊销"
+		}
 	},
 	"config": {
 		"title": "系统配置",
 		"subtitle": "{product} Proxy 与本管理应用共享的键值设置（无需重复环境变量）",
 		"saveTimezone": "保存时区",
 		"saveCurrency": "保存货币",
+		"saveUserChargedCostFactorMode": "保存用户计费倍率模式",
 		"saveErrorWebhooks": "保存错误 Webhook",
 		"businessTimezone": {
 			"title": "业务时区",
@@ -1979,6 +2249,14 @@
 			"title": "计费货币",
 			"description": "仅支持 USD 或 CNY。适用于 pricing_profile 单价及 api_keys 额度字段（每百万 Token 定价）。在 GET /v1/me 中暴露为 billing_currency。",
 			"currency": "货币"
+		},
+		"userChargedCostFactorMode": {
+			"title": "用户专属倍率合成模式",
+			"description": "选择用户专属倍率与路由实际计费倍率的合成方式。路由实际计费倍率已包含供应商倍率。配置约 30 秒内生效。",
+			"multiplyTitle": "叠乘",
+			"multiplyHelp": "最终计费金额 = 目录金额 × 路由实际计费倍率 × 用户专属倍率。目录金额按本次用量和当时目录单价计算；默认使用此模式。",
+			"minTitle": "取较小倍率",
+			"minHelp": "最终计费金额 = 目录金额 × min(路由实际计费倍率, 用户专属倍率)，两者不叠乘。目录金额按本次用量和当时目录单价计算。"
 		},
 		"errorWebhooks": {
 			"title": "Proxy 错误 Webhook",
@@ -2277,6 +2555,58 @@
 		},
 		"cost": "成本：{amount}",
 		"providerLabel": "供应商：{id}",
-		"stdMetered": "标准 {std} · 成本 {metered}"
+		"stdMetered": "标准 {std} · 成本 {metered}",
+		"help": {
+			"routeFactors": {
+				"title": "路由倍率说明",
+				"body": "路由卡片展示实际计费倍率与实际成本倍率，相对于该时段刊例价计算。\n实际计费倍率 = 生效的供应商倍率 × 计费倍率；实际成本倍率同理。供应商有效期外按 ×1。悬浮倍率可查看计算过程与有效期。\n各时段按当前日期预览，只有标记「当前」的行正在生效。路由预览不含用户专属倍率；最终计费还会按全局模式合成用户专属倍率。"
+			},
+			"unitPrices": {
+				"title": "路由单价说明",
+				"body": "计费单价 = 时段目录单价 × 实际计费倍率。\n成本单价 = 时段目录单价 × 实际成本倍率。\n这里展示单位用量的价格，不是一次请求的金额；未合成用户专属倍率。"
+			},
+			"catalog": {
+				"title": "目录价说明",
+				"body": "目录价是模型的基准单价。时段目录单价 = 基准目录单价 × 目录时段倍率。\n不包含供应商倍率、计费倍率、成本倍率或用户专属倍率。"
+			},
+			"amounts": {
+				"title": "费用金额说明",
+				"body": "目录金额：按请求用量与请求发生时的目录单价计算，包含目录时段倍率。\n计费金额：向用户计费的金额，已应用当时生效的路由规则和用户专属倍率。成本金额：按当时生效的路由成本规则计算，不受用户专属倍率影响。\n日志中金额旁的倍率 = 该金额 ÷ 目录金额，是结果比值，不是配置倍率；目录金额为 0 时不显示。"
+			},
+			"profit": {
+				"title": "毛利说明",
+				"body": "毛利 = 计费金额 − 成本金额。\n这里只反映已记录的计费价差，未扣除基础设施、税费及未记录的其他支出。"
+			},
+			"playground": {
+				"title": "调试计费说明",
+				"body": "调试台直连选中的供应商，不经过网关计费。显示的用量和路由定价配置仅供核对，不代表已向用户计费。上游供应商仍可能收取调用费用。"
+			},
+			"simulator": {
+				"title": "模拟器计费说明",
+				"body": "模拟器使用所选 API Key 发起真实网关请求，会执行计费和日志记录。\n响应中的用量只是用量展示；实际计费金额与成本金额请在请求日志中核对，Agent Tools 请查看 Tools 调用记录。"
+			}
+		}
+	},
+	"modelTest": {
+		"request": "测试请求",
+		"requestBody": "JSON 请求体",
+		"template": "测试模板",
+		"custom": "自定义请求",
+		"streaming": "流式响应",
+		"actualRequest": "实际请求",
+		"preview": "发送前预览",
+		"sent": "已发送",
+		"headers": "请求头",
+		"result": "结果预览",
+		"tools": "工具调用",
+		"toolHint": "仅展示模型生成的调用与参数，不执行工具。",
+		"upstreamError": "上游错误",
+		"receiving": "正在接收响应…",
+		"interrupted": "请求已中断，已接收内容保留。",
+		"finished": "响应结束",
+		"noParts": "暂无可读内容，请查看下方流式 data。",
+		"streamData": "流式 data",
+		"events": "{count} 个数据事件",
+		"followHint": "与预览同步更新，向上滚动可暂停跟随。"
 	}
 }

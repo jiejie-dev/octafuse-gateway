@@ -47,11 +47,11 @@ Authorization: Bearer sk-xxx...
 
 Gateway 会根据 `model_id + route_group + request_protocol + request_operation` 解析 Request Surface：先查精确 operation，再回退迁移生成的 `*` Surface。Surface 指向一个 Route Pool，Proxy 仅在该 Pool 内选择 active Target，并跳过 **disabled / 无 api_key** 的 Provider。Pool 内按 **priority（DESC）分层** + **有效策略 + weight** 做 failover；Pool 策略优先于模型与全局策略。每个 Target 还必须通过显式 adapter 拓扑校验：`passthrough` 仅允许协议与 operation 一致，跨协议的 Images / Audio 请求则必须命中注册表中的转换 adapter。
 
-没有匹配 Surface / active Target 或没有当前协议可用上游时，按入口返回 **400** 或 **502**。完整拓扑、operation 列表与迁移兼容路径见 [route-topology.md](../architecture/route-topology.md)。
+没有匹配请求入口、活跃上游目标，或没有当前协议可用上游时，返回 **404** `No available route`（`gateway.no_route`，没有可用路由）。选路查询抛错仍为 **502**。完整拓扑、operation 列表与迁移兼容路径见 [route-topology.md](../architecture/route-topology.md)。
 
 模型 **`tags` 不参与**选组或计费。需要限定某一组时，请使用 **`baseId:your_group`**。
 
-**免费 / 零扣费**：路由侧用户计费（Charged cost）= 官方当刻价（目录档 × 模型官方时段倍率）× 路由有效倍率。无 `schedule.mode` 时有效倍率 = `charged_factor` × 命中窗 `factor`（未命中为 1）；`mode: "override"` 时命中窗用窗口 `factor`，未命中用 `charged_factor`。若 `users.charged_cost_factors` 含该目录模型 ID，再对路由用户计费乘一次该倍率（六位四舍五入）；缺键不改金额。若要用户侧不扣费，将路由 **Charged factor**、对应窗口 `factor`，或该用户该模型的用户计费倍率设为 `0`。智能体工具不应用用户计费倍率或模型官方时段。
+**免费 / 零扣费**：路由侧用户计费（Charged cost）= 官方当刻价（目录档 × 模型官方时段倍率）× 路由有效倍率。路由有效倍率 = 有效期内的 `provider_factor`（供应商倍率，缺省及有效期外为 `1`）× 用户侧倍率。无 `schedule.mode` 时用户侧倍率 = `charged_factor` × 命中窗 `factor`（未命中为 1）；`mode: "override"` 时命中窗用窗口 `factor`，未命中用 `charged_factor`。若 `users.charged_cost_factors` 含该目录模型 ID，再按 `system_config.USER_CHARGED_COST_FACTOR_MODE` 合成最终用户费用（默认 `multiply` 再乘用户倍率；`min` 取路由有效倍率与用户倍率的较小值；六位四舍五入）；缺键不改金额。若要用户侧不扣费，将路由 **Charged factor**、对应窗口 `factor`、有效期内的 **Provider factor**，或该用户该模型的用户计费倍率设为 `0`。智能体工具不应用用户计费倍率、供应商倍率或模型官方时段。
 
 ### 3. 预算校验
 
@@ -63,11 +63,11 @@ Gateway 会根据 `model_id + route_group + request_protocol + request_operation
 
 鉴权后对 **Key 窗口**与 **用户合计窗口**双重执行（先 Key 后 User；Key 已超限则不消耗用户窗口）。两层 JSON 形状相同，当前仅 `rpm`（从当前时刻回溯 60 秒的滚动窗口请求上限，**不是** UTC 自然分钟）：`NULL` / 空对象该层不限，`rpm: 0` 拒绝该层计次请求。两层独立计数，不把用户配置复制到新建 Key。超限返回 **429** `gateway.rate_limited`（含 `Retry-After`，等到该层窗口内有空位），**不区分**是哪一层。计数在代理服务进程 / isolate 内存中，属软上限。
 
-`GET /v1/me` **两层都不计入**。`GET /v1/models` 与其它 `/v1/*` 会计入（若对应层配置了 `rpm`）。配置入口为管理后台用户详情的用户合计 RPM，以及密钥（Keys）页的单 Key RPM；API 见 [admin.md](./admin.md) 的 `PATCH /admin/users/:id` 与 `PATCH /admin/keys/:id`。
+`GET /v1/me` 与 `GET /v1/models` **两层都不计入**。其它 `/v1/*` 会计入（若对应层配置了 `rpm`）。配置入口为管理后台用户详情的用户合计 RPM，以及密钥（Keys）页的单 Key RPM；API 见 [admin.md](./admin.md) 的 `PATCH /admin/users/:id` 与 `PATCH /admin/keys/:id`。
 
 ### 5. 用量日志 `api_key_request_logs`
 
-写入的 **`model_id` 为库内基础模型 ID**（不带 `:group` 后缀）；实际选用的 **`route_group`**、`request_protocol` / `request_operation`、`model_surface_id`、`route_pool_id`、`route_target_id`、`upstream_protocol` / `upstream_operation`、`adapter` 与 `route_trace` 会随请求落库。`provider_key_id` / `provider_key_label` / `provider_key_fingerprint` 为历史兼容列名，现对应 **`providers.id` / `providers.name` / fingerprint(`providers.api_key`)**。相对目录标准价的倍率请见 Target 的 **`price_override`** 中的 **`charged_factor`** / **`metered_factor`**（及兼容字段 **`provider_factor`**）。
+写入的 **`model_id` 为库内基础模型 ID**（不带 `:group` 后缀）；实际选用的 **`route_group`**、`request_protocol` / `request_operation`、`model_surface_id`、`route_pool_id`、`route_target_id`、`upstream_protocol` / `upstream_operation`、`adapter` 与 `route_trace` 会随请求落库。`provider_key_id` / `provider_key_label` / `provider_key_fingerprint` 为历史兼容列名，现对应 **`providers.id` / `providers.name` / fingerprint(`providers.api_key`)**。相对目录标准价的倍率请见 Target 的 **`price_override`**：有效期内的 **`provider_factor`**（供应商倍率，标准价不乘）再乘 **`charged_factor`** / **`metered_factor`**。
 
 ### 6. 输出长度（`max_tokens` / `maxOutputTokens`）
 
@@ -154,17 +154,18 @@ data: [DONE]
 
 ### 错误响应
 
+分类权威是响应头 `X-OctaFuse-Error-Code`，完整清单见 [代理服务错误码](./error-codes.md)。
+
 | 场景 | HTTP | 示例 `error` |
 |------|------|----------------|
 | 请求体非法 JSON | 400 | `Invalid JSON body` |
 | 缺少 `model` | 400 | `Missing model` |
 | `/v1/images/edits` Content-Type 非 `multipart/form-data` | 400 | `Unsupported Content-Type for /v1/images/edits: expected multipart/form-data, got "…"` |
 | `/v1/images/edits` multipart 解析失败 | 400 | `Invalid multipart body` |
-| 有效路由组下无活跃路由（含未写后缀时的 **`default`**） | 400 | `No active routes for route group "default" for this model` |
 | 预算超限 | 403 | `Budget exceeded` |
 | 模型不存在 | 404 | `Model not found` |
+| 没有可用路由（模型存在，但当前入口无匹配请求入口 / 活跃上游目标 / 协议可用上游） | 404 | `No available route`（`gateway.no_route`） |
 | 路由解析失败等 | 502 | 具体错误信息 |
-| 无 OpenAI 协议路由（有效组内无可用上游） | 502 | `No OpenAI route in route group "default" for this model`（组名随有效组变化） |
 
 Images 入参校验失败会打结构化 `console.warn('[Gateway Images] request rejected', …)`（含 `contentType` / `bodyKeys` / `hasModel` 等，**不含** prompt / 图片字节）。Proxy 另有通用 4xx 短错误体日志 `[Gateway] client error response`。
 
@@ -239,7 +240,16 @@ curl http://localhost:8787/v1/responses \
 
 ## Anthropic Messages 兼容接口
 
-Anthropic 兼容入口，支持 `messages` 与流式。
+Anthropic 兼容入口，支持 `messages` 与流式。正式路径只有 `POST /v1/messages`。
+
+另外两条路径是给 SoloEnt Agent 历史版本用的临时别名，不是公开接口，后续要删：
+
+| 路径 | 只服务 |
+|------|--------|
+| `POST /messages` | SoloEnt Agent 0.18.0–0.18.5，且登录态里的 Anthropic 地址不带 `/v1` |
+| `POST /v1/v1/messages` | SoloEnt Agent 0.17.x，且 2026-09-17 之后签发的登录态把 Anthropic 地址写成了 `{root}/v1` |
+
+0.18.6 起 SoloEnt Agent 用网关根地址自己拼 `/v1`，只请求 `POST /v1/messages`。等 0.17.x 与 0.18.0–0.18.5 退出、这些版本的插件 JWT（30 天）过期后，删除上述两条路径，以及 `isAnthropicMessagesPath` 里对应的别名判断。
 
 ### 请求
 
@@ -378,11 +388,11 @@ Admin 中 Provider 的权威配置为 **`providers.endpoints`** JSON（迁移 `0
 
 ## 获取模型列表
 
-OpenAI 兼容的模型列表接口。返回网关中 **至少有一条活跃路由** 的模型（全量可见，不按 API Key 区分）。
+OpenAI 兼容的模型列表接口。返回网关中 **至少有一条活跃路由** 的模型（模型集合全量可见，不按 API Key 过滤）。`model_info.discounts` 会叠该 Key 所属用户的 `charged_cost_factors`；未配置该模型时与公开目录倍率一致。本接口与 `GET /v1/me` 一样不计入 Key / 用户 RPM，额度用尽时仍可访问。
 
-面向 Chat Completions / Agent 的默认行为：**仅返回 LLM**（排除文生图与 ASR；多模态「看图」LLM 仍会返回）。文生图模型（如 `gpt-image-2`）请使用 `POST /v1/images/*` 或 `kind=image`；语音转写（如 `whisper-1`）请使用 `POST /v1/audio/transcriptions` 或 `kind=audio`；`kind=all` 不过滤。
+面向 Chat Completions / Agent 的默认行为：**仅返回 LLM**（排除文生图、ASR 与 TTS；多模态「看图」LLM 仍会返回）。文生图模型（如 `gpt-image-2`）请使用 `POST /v1/images/*` 或 `kind=image`；语音转写与语音合成请使用 `POST /v1/audio/transcriptions`、`POST /v1/audio/speech` 或 `kind=audio`（与管理后台 Kind 一致，同时包含 ASR 与 TTS）；`kind=all` 不过滤。没有单独的 `kind=tts` / `kind=speech`。
 
-`model_info.inbound` 是**请求入口**（`protocol` + `operation`），列出当前可见的 Chat Completions、Responses、Anthropic Messages 或 Gemini generateContent。它们不是 `GET /catalog/models` 的上游 `protocols`。选哪条入口以及思考档位仍由客户端维护，本接口不返回 `thinking_config`。
+`model_info.inbound` 是**请求入口**（`protocol` + `operation`），按当前可见路由列出 LLM 文本入口以及文生图 / ASR / TTS operation。它们不是 `GET /catalog/models` 的上游 `protocols`。公开目录的 `inbound` 与此同形。选哪条入口以及思考档位仍由客户端维护，本接口不返回 `thinking_config`。
 
 ### 请求
 
@@ -395,7 +405,7 @@ GET /v1/models
 | 参数 | 说明 |
 |------|------|
 | `route_groups` | CSV，大小写不敏感。未传 → 默认 `default,free`；传入后仅保留匹配的 group（无匹配则该模型不出现） |
-| `kind` | `llm`（**默认**）仅文本/多模态 LLM；`image` 仅文生图；`audio` 仅语音转写 ASR；`all` 不过滤 kind。非法值回退为 `llm` |
+| `kind` | `llm`（**默认**）仅文本/多模态 LLM（排除文生图、ASR、TTS）；`image` 仅文生图；`audio` 语音转写 ASR **与**语音合成 TTS（与管理后台 Kind 对齐）；`all` 不过滤 kind。非法值回退为 `llm`。没有 `kind=tts` / `kind=speech` |
 
 ### 响应
 
@@ -413,7 +423,18 @@ GET /v1/models
         "route_groups": ["default", "free"],
         "context_window": 128000,
         "max_tokens": 4096,
-        "pricing_profile": "{\"tiers\":[{\"upto\":null,\"label\":null,\"input_price\":0.01,\"output_price\":0.01,\"cache_read_price\":null,\"cache_write_price\":null}]}",
+        "pricing_profile": {
+          "tiers": [
+            {
+              "upto": null,
+              "label": null,
+              "input_price": 0.01,
+              "output_price": 0.01,
+              "cache_read_price": null,
+              "cache_write_price": null
+            }
+          ]
+        },
         "input_price": 0.01,
         "output_price": 0.01,
         "description": "智谱 GLM-4 通用模型",
@@ -444,20 +465,20 @@ GET /v1/models
 | 字段 | 类型 | 描述 |
 |------|------|------|
 | `display_name` | string \| null | 模型显示名称 |
-| `vendor` | string | 模型供应商标识，如 `openai`、`anthropic`、`google` |
-| `tags` | string[] | 模型标签数组，如 `["free", "general"]`（**仅展示/目录元数据**，不参与自动选组或计费公式）。`Discount:<factor>` / `Discount.<group>:<factor>` 由网关按当刻 `discounts` 自动派生，手工写入会被覆盖 |
+| `vendor` | string | 模型供应商标识，如 `openai`、`anthropic`、`google`。为空或仅空白时返回 `other`（与 Catalog 对齐；列缺省为 `other`） |
+| `tags` | string[] | 运营维护的展示标签，如 `["pro", "general"]`（**仅展示/目录元数据**，不参与自动选组或计费公式）。不再注入 `Discount.*`；折扣以 `discounts` 为准 |
 | `route_groups` | string[] | 当前模型下 **活跃路由** 的去重 `route_group` 列表，供客户端构造请求中的 `baseId:group` |
 | `context_window` | number \| null | 上下文窗口大小（token 数） |
 | `max_tokens` | number \| null | 目录/展示用参考（常见最大输出能力）；**转发时不用于截断**，实际输出上限见上文「输出长度」 |
-| `pricing_profile` | string \| null | 模型主定价 JSON（canonical：`{ "tiers": [ { "upto", "label", "input_price", "output_price", … } ], "schedule"?: [ { "start", "end", "factor", "days"? } ] }`）；**末档 `upto` 为 `null` 表示开放上界**；完整阶梯与 cache 价以此为准。可选 `schedule` 为官方分时倍率（时区为 `BUSINESS_TIMEZONE`，不写入 JSON） |
+| `pricing_profile` | object \| null | 解析后的模型主定价（与 Catalog 同形：`{ "tiers": [ { "upto", "label", "input_price", "output_price", … } ], "schedule"?: [ { "start", "end", "factor", "days"? } ] }`）；非法 JSON 为 `null`。**末档 `upto` 为 `null` 表示开放上界**；完整阶梯与 cache 价以此为准。可选 `schedule` 为官方分时倍率（时区为 `BUSINESS_TIMEZONE`，不写入 JSON） |
 | `input_price` | number \| null | **兼容展示**：由 `pricing_profile` 派生（取各档中 **最低** `input_price` 所在档的输入价，**不含**官方时段）；无合法 profile 时为 `null` |
 | `output_price` | number \| null | **兼容展示**：与上档同行的输出价（$/1M），同样不含官方时段 |
 | `description` | string \| null | 模型描述 |
 | `input_modalities` | string[] \| null | 支持的输入模态（OpenRouter 风格）：`text`、`image`、`audio`、`video`、`file`；客户端可据此限制附件类型 |
 | `output_modalities` | string[] \| null | 支持的输出模态：`text`、`image`、`audio` |
 | `released_at` | string \| null | 模型发布日期（`YYYY-MM-DD`） |
-| `discounts` | object | 按 `route_group` 派生的前台折扣。每个 group 含 `kind`（`flat` / `schedule`）、`timezone`、`schedule_mode`、代表路由的 `priority`/`weight`、`current` 当刻窗口，以及 `windows[]`（`catalog_factor` × `route_factor` = `composite_factor`）。代表路由取该 group 下 active 路由中 `priority` 最大、同层 `weight` 最大的一条；两者仍并列时取当刻 `composite_factor` 最小（折扣最大）的一条，倍率也相同则保持列表原顺序。官方或路由时段未覆盖的钟点会补 `catalog_factor=1` 的兜底窗（含带 `days` 的工作日高峰：工作日空隙与周末整日都会补），因此仅工作日高峰、倍率相同的官方窗不会被压成 `kind: flat`。不含用户级 `charged_cost_factors` |
-| `inbound` | object[] | **请求入口**（客户端可打的公开路径）：`{ protocol, operation }`。仅聚合当前可见 `route_groups` 下 active 请求入口中的 LLM 文本入口：`openai.chat`、`openai.responses`、`anthropic.messages`、`gemini.models.generate`。不含图 / 音频。`operation=*` 在同协议没有精确入口时展开为该协议默认文本 operation（OpenAI → `chat`）。列表按稳定顺序去重（`responses` 排在 `chat` 前），**不是**推荐入口；选哪条由客户端决定。与 `GET /catalog/models` 的 `protocols`（**上游协议**）不同：Chat 与 Responses 都是 `openai`，必须看 `operation` |
+| `discounts` | object | 按 `route_group` 派生的前台折扣。每个 group 含 `kind`（`flat` / `schedule`）、`timezone`、`schedule_mode`、代表路由的 `priority`/`weight`、`current` 当刻窗口，以及 `windows[]`（`catalog_factor` × `route_factor` = `composite_factor`）。代表路由取该 group 下 active 路由中 `priority` 最大、同层 `weight` 最大的一条；两者仍并列时取当刻 `composite_factor` 最小（折扣最大）的一条，倍率也相同则保持列表原顺序。官方或路由时段未覆盖的钟点会补 `catalog_factor=1` 的兜底窗（含带 `days` 的工作日高峰：工作日空隙与周末整日都会补），因此仅工作日高峰、倍率相同的官方窗不会被压成 `kind: flat`。若该用户配置了该目录模型的 `charged_cost_factors`，再按 `USER_CHARGED_COST_FACTOR_MODE` 叠进 **`route_factor`** 后重算 `composite_factor`（`multiply` 为路由 × 用户；`min` 取较小 Charged；`catalog_factor` 不变）。未配置该模型时与 `GET /catalog/models` 倍率一致 |
+| `inbound` | object[] | **请求入口**（客户端可打的公开路径）：`{ protocol, operation }`。聚合当前可见 `route_groups` 下 active 请求入口：LLM 文本为 `openai.chat`、`openai.responses`、`anthropic.messages`、`gemini.models.generate`；图 / 音频为 `openai.images.generations`、`openai.images.edits`、`openai.audio.transcriptions`、`openai.audio.speech`。不含 DashScope 原生 operation。`operation=*` 在同协议没有精确入口时展开为该协议默认文本 operation（OpenAI → `chat`，Anthropic → `messages`，Gemini → `models.generate`）；同协议已有精确入口（含图 / 音频）时不再展开。列表按稳定顺序去重（LLM 文本在前，`responses` 排在 `chat` 前，随后为图 / 音频），**不是**推荐入口；选哪条由客户端决定。与 `GET /catalog/models` 的 `protocols`（**上游协议**）不同：Chat 与 Responses 都是 `openai`，必须看 `operation` |
 | `metadata` | object \| undefined | 扩展元数据 |
 
 ### 示例
@@ -471,7 +492,11 @@ curl http://localhost:8787/v1/models \
 curl "http://localhost:8787/v1/models?kind=image" \
   -H "Authorization: Bearer sk-xxx..."
 
-# 全部 kind
+# 音频：ASR 与 TTS
+curl "http://localhost:8787/v1/models?kind=audio" \
+  -H "Authorization: Bearer sk-xxx..."
+
+# 全部 kind（再按定价 / 模态 / inbound 自行筛选）
 curl "http://localhost:8787/v1/models?kind=all" \
   -H "Authorization: Bearer sk-xxx..."
 ```
@@ -480,7 +505,7 @@ curl "http://localhost:8787/v1/models?kind=all" \
 
 ## 公开模型目录（Catalog Discovery）
 
-面向门户、文档站等 **无需用户 API Key** 的运行时能力发现接口。基于 **active `model_routes`** 聚合各 `route_group` 支持的 **`upstream_protocol`**，不返回 provider id、API key、`provider_model_name` 等运维字段。
+面向门户、文档站等 **无需用户 API Key** 的运行时能力发现接口。基于 **active `model_routes`** 聚合各 `route_group` 支持的 **`upstream_protocol`**，并用同一批路由的请求入口填充 `inbound`。不返回 provider id、API key、`provider_model_name` 等运维字段。
 
 ### 请求
 
@@ -526,29 +551,46 @@ GET /catalog/models
         "default": ["openai"],
         "free": ["openai"]
       },
+      "inbound": [{ "protocol": "openai", "operation": "chat" }],
       "recommended_protocol": "openai",
       "description": "智谱 GLM-4 通用模型",
       "input_modalities": ["text", "image", "file"],
       "output_modalities": ["text"],
       "released_at": "2024-06-05",
+      "discounts": {
+        "default": {
+          "timezone": "Asia/Shanghai",
+          "kind": "flat",
+          "schedule_mode": "multiply",
+          "route": { "priority": 10, "weight": 1 },
+          "current": { "catalog_factor": 1, "route_factor": 0.7, "composite_factor": 0.7 },
+          "windows": [{ "catalog_factor": 1, "route_factor": 0.7, "composite_factor": 0.7 }]
+        }
+      },
       "metadata": {}
     }
   ]
 }
 ```
 
-Catalog 条目同样包含 `input_modalities`、`output_modalities`、`released_at`、`discounts`（语义与 `model_info` 一致；`pricing_profile` 为解析后的对象，可含 `schedule`）。`discounts.*.timezone` 即 `system_config.BUSINESS_TIMEZONE`。
+Catalog 条目同样包含 `input_modalities`、`output_modalities`、`released_at`、`discounts`。`discounts` 形状与 `GET /v1/models` 的 `model_info.discounts` 相同，但 **只含官方时段 × 代表路由 Charged**（平台公共折扣），不含用户级 `charged_cost_factors`。`pricing_profile` 为解析后的对象，可含 `schedule`。`discounts.*.timezone` 即 `system_config.BUSINESS_TIMEZONE`。`vendor` 为空或仅空白时返回 `other`。`tags` 为运营维护的展示标签，不含派生的 `Discount.*`。
+
+`inbound` 与 `GET /v1/models` 的 `model_info.inbound` 同形：按当前可见 `route_groups` 聚合客户端请求入口（`protocol` + `operation`）。同一 `openai` 下，`chat`（`/v1/chat/completions`）与 `responses`（`/v1/responses`）是不同端点。门户展示可调用路径时应读 `inbound`，不要只凭上游 `protocols` 猜测。聚合规则、operation 白名单与稳定排序见上文 `inbound` 字段说明。
+
+`recommended_protocol` 是门户展示用提示，**不是**强制入口：在当前可见 `protocols` 去重集合中，若同时存在多种协议，优先 `anthropic`，其次 `gemini`；否则取稳定排序后的第一项（顺序为 `openai` → `anthropic` → `gemini` → `dashscope`），空则 `openai`。
 
 ### 与 `GET /v1/models` / Admin 的差异
 
-| 维度 | `GET /v1/models` | `GET /catalog/models` | `GET /admin/models` |
-|------|------------------|------------------------|---------------------|
-| 部署 | Proxy | Proxy | Admin |
-| 认证 | 用户 API Key | **无** | Console Session 或具名 Admin API Key |
-| 默认 `route_groups` | `default,free` | 未传 → **全部** active group | — |
-| 默认 `kind` | `llm`（排除文生图） | 不过滤 kind | — |
-| 协议能力 | `inbound`（请求入口 protocol + operation） | `protocols` / `protocols_by_group`（**上游** `upstream_protocol`） | 不返回 |
-| 主要用途 | Agent 兼容列表 | 门户 / 公开 discovery | 运维 CRUD |
+| 维度 | `GET /v1/models` | `GET /catalog/models` | `GET /admin/models` | `GET /admin/users/:id/display-discounts` |
+|------|------------------|------------------------|---------------------|------------------------------------------|
+| 部署 | Proxy | Proxy | Admin | Admin |
+| 认证 | 用户 API Key | **无** | Console Session 或具名 Admin API Key | Console Session 或 `users.read` |
+| `discounts` | 官方时段 × 路由 Charged，再叠该用户模型倍率 | 仅官方时段 × 路由 Charged（公共折扣） | — | 与 `/v1/models` 相同合成；**只含已配置用户倍率的模型** |
+| 默认 `route_groups` | `default,free` | 未传 → **全部** active group | — | 未传 → **全部** active group |
+| 默认 `kind` | `llm`（排除文生图、ASR、TTS；`kind=audio` = ASR + TTS） | 不过滤 kind | — | 不过滤 kind |
+| 协议能力 | `inbound`（请求入口 protocol + operation） | `protocols` / `protocols_by_group`（**上游** `upstream_protocol`）以及 `inbound`（请求入口，与 `/v1/models` 同形） | 不返回 | 不返回（只 overlay `discounts`） |
+| 计入用户 RPM | 否 | 否 | 否 | 否 |
+| 主要用途 | Agent 兼容列表 | 门户 / 公开 discovery | 运维 CRUD | 用户个性化折扣 overlay |
 
 Admin 静态导入目录见 **`GET /admin/models/import/catalog`**（与上表无关，见 [管理接口](./admin.md#admin-vs-proxy-catalog)）。
 
@@ -1009,6 +1051,8 @@ Content-Type: application/json
 
 同协议 OpenAI 上游使用 `passthrough`；转到 DashScope SpeechSynthesizer、Qwen-TTS 或 MiniMax 时，必须选择对应的显式 adapter。TTS 目录价使用 `audio_billing_mode=per_character`，最终费用只采用上游返回的真实 `usage.characters`；缺失时不会用输入长度补算。
 
+默认 `GET /v1/models` **不含** TTS；列出 TTS 请用 `kind=audio`（同时含 ASR）或 `kind=all`。命中可见 `audio.speech` 路由时，`model_info.inbound` 会包含 `{ "protocol": "openai", "operation": "audio.speech" }`。
+
 ```bash
 curl -sS "$GATEWAY_URL/v1/audio/speech" \
   -H "Authorization: Bearer $USER_API_KEY" \
@@ -1123,7 +1167,7 @@ curl -sS "$GATEWAY_URL/v1/audio/transcriptions" \
   -F response_format=json
 ```
 
-默认 `GET /v1/models` **不含** ASR 模型；列表可用 `kind=audio` / `kind=all`。Admin 侧 Kind 判定依据为有效的 `audio_billing_mode`（`per_second` + `audio` 块，或 `token` + `tiers`），见 [admin.md「pricing_profile」](./admin.md#pricing_profile--price_override-契约adminmodelsadminroutes)。
+默认 `GET /v1/models` **不含** ASR / TTS；列表可用 `kind=audio`（ASR + TTS，与管理后台 Kind 对齐）或 `kind=all`。命中可见 `audio.transcriptions` 路由时，`model_info.inbound` 会包含 `{ "protocol": "openai", "operation": "audio.transcriptions" }`。Admin 侧 Kind 判定依据为有效的 `audio_billing_mode`（ASR：`per_second` + `audio` 块，或 `token` + `tiers`；TTS：`per_character` + `audio`），见 [admin.md「pricing_profile」](./admin.md#pricing_profile--price_override-契约adminmodelsadminroutes)。
 ---
 
 ## 获取当前用户预算状态
@@ -1190,7 +1234,7 @@ curl http://localhost:8787/v1/me \
 
 ### 请求限流
 
-若 Key 或用户配置了 `rate_limit.rpm`，超限返回 **429** `gateway.rate_limited` 与 `Retry-After`。`GET /v1/me` 不计次；详见上文「请求限流」。
+若 Key 或用户配置了 `rate_limit.rpm`，超限返回 **429** `gateway.rate_limited` 与 `Retry-After`。`GET /v1/me` 与 `GET /v1/models` 不计次；详见上文「请求限流」。
 
 ### 定价模型
 
@@ -1207,10 +1251,10 @@ LLM 及 token 模式的价格以每百万 token 为单位（per-million-token pr
 
 - `cache_read_price` 和 `cache_write_price` 默认等于 `input_price`
 - Images 还支持 `per_image` 按张计价，Audio 支持 `per_second` 按时长或 `token` 计价，Agent Tools 使用固定按次单价；分别见上文对应章节。
-- 路由 **`price_override`** 以 **`charged_factor` / `metered_factor`**（及可选分时 **`schedule`**，窗口可带 ISO `days`）相对官方当刻价计费；嵌套 `metered`/`charged` tiers 忽略。
+- 路由 **`price_override`** 以有效期内的 **`provider_factor`** × **`charged_factor` / `metered_factor`**（及可选分时 **`schedule`**，窗口可带 ISO `days`；`schedule.provider` 与另外两侧共用 `mode`）相对官方当刻价计费。`standard_cost` 不乘 `provider_factor`。嵌套 `metered`/`charged` tiers 忽略。
 - 路由级 **`route_group`** 会写入 `api_key_request_logs` 快照。
   - **`standard_cost`（官方当刻目录价）**：按当前计费模式从 `models.pricing_profile` 选档后再乘模型官方时段倍率，不乘路由倍率
-  - **`metered_cost`（供应成本）** / **`charged_cost`（用户扣费）**：官方当刻价 × 路由有效倍率（无 `schedule.mode` 时叠乘；`override` 时窗内用窗口 factor）。若用户对该目录模型配置了用户计费倍率，仅对路由算出的用户扣费再乘一次；供应成本与官方当刻价不变。详见 `docs/developers/reference/streaming-billing.md`
+  - **`metered_cost`（供应成本）** / **`charged_cost`（用户扣费）**：官方当刻价 × 路由有效倍率（无 `schedule.mode` 时叠乘；`override` 时窗内用窗口 factor）。若用户对该目录模型配置了用户计费倍率，再按 `USER_CHARGED_COST_FACTOR_MODE`（`multiply` / `min`）合成最终用户扣费；供应成本与官方当刻价不变。详见 `docs/developers/reference/streaming-billing.md`
 - `users.budget_spent` 仅按最终 `charged_cost` 累加
 
 ### 使用量追踪

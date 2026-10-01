@@ -54,7 +54,7 @@ function ModelsContent() {
 				onClearFilter={state.clearFilters}
 			/>
 
-			<div className="grid grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-6 xl:grid-cols-3 2xl:grid-cols-4">
+			<div className="admin-catalog-grid">
 				<ModelAddCard
 					importSubmitting={state.importSubmitting}
 					createTitle={createTitle}
@@ -89,6 +89,7 @@ function ModelsContent() {
 			<ModelModal
 				open={state.showModal}
 				editingModel={state.editingModel}
+				duplicateSourceModelId={state.duplicateSourceModelId}
 				formData={state.formData}
 				formKind={state.formKind}
 				pricingTierRows={state.pricingTierRows}
@@ -115,6 +116,7 @@ function ModelsContent() {
 				onKindChange={state.applyFormKind}
 				onSave={state.handleSave}
 				onDelete={state.handleDelete}
+				onDuplicate={state.handleDuplicate}
 			/>
 
 			<ModelImportModal

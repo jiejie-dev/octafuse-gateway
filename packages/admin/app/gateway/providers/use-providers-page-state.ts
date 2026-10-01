@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
+import { sortProvidersByKindThenName } from '@/lib/provider-kind';
 import { useFeedback } from '@/components/feedback';
 import { useReplaceListPageQuery } from '@/lib/use-replace-list-query';
 import {
@@ -18,7 +19,6 @@ import {
 	providerMatchesListFilter,
 	providerMatchesSearch,
 	providerToFormData,
-	suggestDuplicateProviderId,
 } from './provider-utils';
 import type {
 	GatewayProvider,
@@ -49,6 +49,8 @@ function emptyFilterCounts(): Record<ProviderListFilter, number> {
 }
 
 export function useProvidersPageState() {
+	const locale = useLocale();
+	const tKind = useTranslations('providers.kind');
 	const tImport = useTranslations('providers.import');
 	const tModal = useTranslations('providers.modal');
 	const tCommon = useTranslations('common');
@@ -76,6 +78,8 @@ export function useProvidersPageState() {
 	const [importSelected, setImportSelected] = useState<Record<string, boolean>>({});
 	const [importSubmitting, setImportSubmitting] = useState(false);
 	const [statusTogglingId, setStatusTogglingId] = useState<string | null>(null);
+	const loadedApiKeyRef = useRef<string | null>(null);
+	const apiKeyLoadGenRef = useRef(0);
 
 	useEffect(() => {
 		const q = searchParams.get('q');
@@ -98,11 +102,14 @@ export function useProvidersPageState() {
 		return params;
 	}, [providerSearch, selectedFilter]);
 
-	const existingProviderIds = useMemo(() => new Set(providers.map((p) => p.id)), [providers]);
-
+	const customKindLabel = tKind('custom');
+	const orderedProviders = useMemo(
+		() => sortProvidersByKindThenName(providers, locale, customKindLabel),
+		[providers, locale, customKindLabel],
+	);
 	const searchMatchedProviders = useMemo(
-		() => providers.filter((provider) => providerMatchesSearch(provider, providerSearch)),
-		[providerSearch, providers]
+		() => orderedProviders.filter((provider) => providerMatchesSearch(provider, providerSearch)),
+		[providerSearch, orderedProviders]
 	);
 
 	const filterCounts = useMemo(() => {
@@ -189,6 +196,8 @@ export function useProvidersPageState() {
 	);
 
 	const handleCreate = useCallback(() => {
+		loadedApiKeyRef.current = null;
+		apiKeyLoadGenRef.current += 1;
 		setEditingProvider(null);
 		setDuplicateSourceId(null);
 		setFormData({
@@ -205,6 +214,8 @@ export function useProvidersPageState() {
 	}, []);
 
 	const handleEdit = useCallback((provider: GatewayProvider) => {
+		const loadGen = ++apiKeyLoadGenRef.current;
+		loadedApiKeyRef.current = null;
 		setEditingProvider(provider);
 		setDuplicateSourceId(null);
 		setFormData({
@@ -215,14 +226,29 @@ export function useProvidersPageState() {
 		});
 		setShowModal(true);
 		setSaveError('');
+		void fetchProviderApiKeyPlaintext(provider.id)
+			.then((apiKey) => {
+				if (apiKeyLoadGenRef.current !== loadGen) return;
+				loadedApiKeyRef.current = apiKey;
+				setFormData((current) => {
+					if (current.id !== provider.id || current.api_key.trim()) return current;
+					return { ...current, api_key: apiKey };
+				});
+			})
+			.catch((error) => {
+				if (apiKeyLoadGenRef.current !== loadGen) return;
+				console.error('Load provider API key error:', error);
+			});
 	}, []);
 
 	const handleDuplicate = useCallback(
 		(provider: GatewayProvider) => {
+			loadedApiKeyRef.current = null;
+			apiKeyLoadGenRef.current += 1;
 			setEditingProvider(null);
 			setDuplicateSourceId(provider.id);
 			setFormData({
-				id: suggestDuplicateProviderId(provider.id, existingProviderIds),
+				id: '',
 				name: `${provider.name} (copy)`,
 				...providerToFormData(provider),
 				api_key: '',
@@ -232,7 +258,7 @@ export function useProvidersPageState() {
 			setShowModal(true);
 			setSaveError('');
 		},
-		[existingProviderIds]
+		[]
 	);
 
 	const handleDelete = useCallback(
@@ -347,10 +373,21 @@ export function useProvidersPageState() {
 			setSaveError('API key is required');
 			return;
 		}
+		if (!editingProvider && !formData.kind.trim()) {
+			setSaveError(tModal('kindRequiredError'));
+			return;
+		}
 		setSaveError('');
 		setIsSaving(true);
 		try {
-			const result = await saveProvider(formData, editingProvider?.id ?? null);
+			const unchangedKey =
+				Boolean(editingProvider) &&
+				loadedApiKeyRef.current !== null &&
+				formData.api_key.trim() === loadedApiKeyRef.current;
+			const result = await saveProvider(
+				unchangedKey ? { ...formData, api_key: '' } : formData,
+				editingProvider?.id ?? null
+			);
 			if (result.success) {
 				setShowModal(false);
 				void refreshProviders();
@@ -363,7 +400,7 @@ export function useProvidersPageState() {
 		} finally {
 			setIsSaving(false);
 		}
-	}, [editingProvider, formData, refreshProviders]);
+	}, [editingProvider, formData, refreshProviders, tModal]);
 
 	const closeProviderModal = useCallback(() => {
 		if (isSaving || isDeleting) return;

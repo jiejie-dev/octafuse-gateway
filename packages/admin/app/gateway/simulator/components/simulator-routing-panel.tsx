@@ -32,6 +32,7 @@ type Props = {
 	selectedModelIsAudio?: boolean;
 	modelRoutingString: string;
 	matchingRoutes: RouteListRow[];
+	providerLabelFor: (route: { provider_id: string; provider_name?: string | null }) => string;
 };
 
 export function SimulatorRoutingPanel({
@@ -58,6 +59,7 @@ export function SimulatorRoutingPanel({
 	selectedModelIsAudio = false,
 	modelRoutingString,
 	matchingRoutes,
+	providerLabelFor,
 }: Props) {
 	const t = useTranslations('simulator');
 	const tTools = useTranslations('tools.catalog');
@@ -105,7 +107,7 @@ export function SimulatorRoutingPanel({
 			{isToolKind ? (
 				<div className="flex min-h-0 flex-1 flex-col">
 					<div
-						className="min-h-[12rem] flex-1 overflow-y-auto rounded-md border border-gray-200 bg-white xl:min-h-0"
+						className="h-40 min-h-0 flex-none overflow-y-auto xl:h-auto xl:flex-1 rounded-md border border-gray-200 bg-white xl:min-h-0"
 						role="listbox"
 						aria-label={t('tool')}
 					>
@@ -145,7 +147,7 @@ export function SimulatorRoutingPanel({
 							aria-label={t('model')}
 						/>
 						<div
-							className="min-h-[16rem] flex-1 overflow-y-auto rounded-md border border-gray-200 bg-white xl:min-h-0"
+							className="h-48 min-h-0 flex-none overflow-y-auto xl:h-auto xl:flex-1 rounded-md border border-gray-200 bg-white xl:min-h-0"
 							role="listbox"
 							aria-label={t('model')}
 						>
@@ -234,7 +236,7 @@ export function SimulatorRoutingPanel({
 										{matchingRoutes.map((r) => (
 											<li key={r.id} className="px-2.5 py-1.5 font-mono text-gray-800">
 												<span className="font-semibold text-gray-900">
-													{r.provider_name || r.provider_id || '—'}
+													{providerLabelFor(r) || '—'}
 												</span>
 												<span className="text-gray-500">
 													{' '}

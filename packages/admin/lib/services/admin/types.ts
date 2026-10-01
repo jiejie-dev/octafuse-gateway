@@ -111,6 +111,8 @@ export type AdminKeyUpdateInput = {
 export type AdminProviderMutationInput = {
 	id?: unknown;
 	name?: unknown;
+	/** 导入模板英文 `name`，或 `__custom__`。创建必填；PATCH 省略 = 不改，空串 = 尚未分类。 */
+	kind?: unknown;
 	/** `{ openai?: { base?, endpoints? }, … }` 对象或 JSON 字符串 */
 	endpoints?: unknown;
 	/** 创建必填；PATCH 时空串/省略 = 不改 */
@@ -257,10 +259,17 @@ export type AdminModelsImportOutput = {
 export type AdminProviderRow = {
 	id: string;
 	name: string;
-	/** 由内置 Provider 预设名称 / Endpoint 动态推导，不持久化。 */
+	/** 由内置 Provider 预设名称 / Endpoint 动态推导，或在 `kind` 已设置时由模板决定。不单独落库。 */
 	vendor_key?: string;
-	/** 由内置 Provider 预设动态推导的产品级图标，不持久化。 */
+	/** 产品级图标。`kind` 已设置时来自对应模板，否则按 URL / 名称推断。不单独落库。 */
 	icon_key?: string;
+	/** 导入模板英文名、`__custom__`，或空字符串（尚未分类）。 */
+	kind?: string;
+	/** 已保存类型的中英文展示名。自定义与未分类时省略。 */
+	kind_labels?: {
+		en: string;
+		zh: string;
+	};
 	/** 由内置预设叠加的官网 / 密钥 / 邀请链接，不持久化。 */
 	catalog_links?: {
 		platform?: string;
@@ -279,6 +288,8 @@ export type AdminProviderRow = {
 	routes_count?: number;
 	/** 其中 status=active 的数量 */
 	active_routes_count?: number;
+	/** 当前 `kind` 是否有额度适配器。不落库。 */
+	quota_supported?: boolean;
 	[key: string]: unknown;
 };
 
@@ -526,7 +537,12 @@ export type AdminModelAnalyticsRow = {
 	content_ttft_rate: number;
 	avg_upstream_response_ms: number | null;
 	tokens_per_second: number | null;
+	stream_tokens_per_second?: number | null;
+	stream_sample_count?: number;
 	failover_rate: number;
+	/** Requests with at least one failover; legacy failover_rate counts events per 100 requests. */
+	failover_request_count?: number;
+	failover_request_rate?: number;
 	avg_attempts: number | null;
 	avg_charged_per_request: number;
 };
@@ -561,7 +577,12 @@ export type AdminProviderAnalyticsRow = {
 	content_ttft_rate: number;
 	avg_upstream_response_ms: number | null;
 	tokens_per_second: number | null;
+	stream_tokens_per_second?: number | null;
+	stream_sample_count?: number;
 	failover_rate: number;
+	/** Requests with at least one failover; legacy failover_rate counts events per 100 requests. */
+	failover_request_count?: number;
+	failover_request_rate?: number;
 	avg_attempts: number | null;
 	avg_charged_per_request: number;
 };
@@ -586,6 +607,7 @@ export type AdminUserAnalyticsRow = {
 	wallet_granted?: number | null;
 	wallet_spent?: number | null;
 	budget_usage_rate: number | null;
+	success_count?: number;
 	success_rate: number;
 	error_count: number;
 };
@@ -616,6 +638,9 @@ export type AdminReliabilityProviderRow = {
 	avg_latency_ms: number | null;
 	avg_upstream_response_ms: number | null;
 	failover_rate: number;
+	/** Requests with at least one failover; legacy failover_rate counts events per 100 requests. */
+	failover_request_count?: number;
+	failover_request_rate?: number;
 	avg_attempts: number | null;
 	charged_cost: number;
 	metered_cost: number;
@@ -631,6 +656,9 @@ export type AdminReliabilityModelProviderRow = {
 	avg_latency_ms: number | null;
 	avg_upstream_response_ms: number | null;
 	failover_rate: number;
+	/** Requests with at least one failover; legacy failover_rate counts events per 100 requests. */
+	failover_request_count?: number;
+	failover_request_rate?: number;
 	avg_attempts: number | null;
 	charged_cost: number;
 	metered_cost: number;

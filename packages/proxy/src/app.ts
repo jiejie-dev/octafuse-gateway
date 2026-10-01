@@ -34,6 +34,12 @@ export type GatewayBindings = {
 	DATABASE_DRIVER?: string;
 	/** Node upgrade 请求临时注入的实时 WebSocket 调度器；不作为 Worker binding。 */
 	NODE_REALTIME_DISPATCH?: DashScopeRealtimeNodeDispatch;
+	/** 可选；尚未收到非空 chunk 的等待上限（毫秒）。空则代码默认 2 分钟。 */
+	STREAM_FIRST_CHUNK_TIMEOUT_MS?: string;
+	/** 可选；已吐 chunk 后的空闲上限（毫秒）。空则代码默认 90 秒。 */
+	STREAM_IDLE_TIMEOUT_MS?: string;
+	/** 可选；usagePromise 绝对兜底（毫秒）。空则代码默认 10 分钟。 */
+	USAGE_SAFETY_TIMEOUT_MS?: string;
 };
 
 export type Env = {
@@ -112,6 +118,15 @@ export function createProxyApp(resolveStorage: StorageResolver, options?: ProxyA
 	app.route('/v1/dashscope/realtime', dashScopeRealtimeRoutes);
 	app.route('/v1/dashscope/services/aigc/multimodal-generation/generation', dashScopeMultimodalRoutes);
 	app.route('/v1/messages', messagesRoutes);
+	// TEMP(soloent): 只为兼容 SoloEnt Agent 的历史拼路径，不是公开 API。
+	// 0.18.0–0.18.5 + 旧 token → POST /messages
+	// 0.17.x + 2026-09-17 之后签发的 token → POST /v1/v1/messages
+	// 0.18.6 起 Agent 用 rootUrl 自己拼 /v1，只打 /v1/messages。
+	// 删除条件：0.17.x 与 0.18.0–0.18.5 已退出，且这些版本签发的插件 JWT 已过期（30 天）。
+	// 删除时一并去掉：这两条 route、auth.ts 里 isAnthropicMessagesPath 的别名分支、
+	// messages-legacy-paths.test.ts。正式入口只保留 POST /v1/messages。
+	app.route('/messages', messagesRoutes);
+	app.route('/v1/v1/messages', messagesRoutes);
 	app.route('/v1beta', geminiRoutes);
 	app.route('/v1/me', meRoutes);
 	app.route('/v1/models', modelsRoutes);

@@ -1,4 +1,6 @@
+import type { ProviderQuotaSnapshot } from '@octafuse/core/provider-quota';
 import { readApiJson } from '@/lib/api-json';
+import { sortProvidersByKindThenName } from '@/lib/provider-kind';
 import type { GatewayProvider } from '@/lib/types';
 import { formDataToEndpointsMap } from './provider-utils';
 import type { ProviderFormData, ProviderImportCatalogRow, ProviderImportResult } from './types';
@@ -7,7 +9,7 @@ export async function fetchProvidersList(): Promise<GatewayProvider[]> {
 	const response = await fetch('/api/admin/providers');
 	const data = await readApiJson<GatewayProvider[]>(response);
 	if (data.success && data.data) {
-		return [...data.data].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+		return sortProvidersByKindThenName(data.data, 'en', 'Custom');
 	}
 	throw new Error(data.message || 'Failed to load providers');
 }
@@ -18,6 +20,7 @@ export async function saveProvider(
 ): Promise<{ success: true } | { success: false; message: string }> {
 	const payload: Record<string, unknown> = {
 		name: formData.name,
+		kind: formData.kind,
 		description: formData.description,
 		endpoints: formDataToEndpointsMap(formData),
 		status: formData.status === 'disabled' ? 'disabled' : 'active',
@@ -40,9 +43,6 @@ export async function saveProvider(
 			return { success: false, message: 'api_key is required' };
 		}
 		payload.api_key = apiKey;
-		if (formData.id.trim()) {
-			payload.id = formData.id.trim();
-		}
 		response = await fetch('/api/admin/providers', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
@@ -105,4 +105,13 @@ export async function toggleProviderStatus(
 	const data = await readApiJson(response);
 	if (data.success) return { success: true };
 	return { success: false, message: data.message || 'Update failed' };
+}
+
+export async function fetchProviderQuota(
+	providerId: string,
+): Promise<{ success: true; data: ProviderQuotaSnapshot } | { success: false; message: string }> {
+	const response = await fetch(`/api/admin/providers/${encodeURIComponent(providerId)}/quota`);
+	const data = await readApiJson<ProviderQuotaSnapshot>(response);
+	if (data.success && data.data) return { success: true, data: data.data };
+	return { success: false, message: data.message || 'Failed to query provider quota' };
 }

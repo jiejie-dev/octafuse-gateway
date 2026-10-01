@@ -34,6 +34,7 @@ type Props = {
 	onFilterProviderChange: (v: string) => void;
 	modelOptions: FilterOption[];
 	providerOptions: FilterOption[];
+	providerLabelFor: (route: { provider_id: string; provider_name?: string | null }) => string;
 	routesInKindTotal: number;
 	filteredRoutes: RouteListRow[];
 	selectedId: string;
@@ -53,6 +54,7 @@ export function PlaygroundSetupPanel({
 	onFilterProviderChange,
 	modelOptions,
 	providerOptions,
+	providerLabelFor,
 	routesInKindTotal,
 	filteredRoutes,
 	selectedId,
@@ -153,7 +155,7 @@ export function PlaygroundSetupPanel({
 				<div className="flex min-h-0 flex-1 flex-col">
 					<label className={labelClass}>{t('selectRoute')}</label>
 					<div
-						className="min-h-[16rem] flex-1 overflow-y-auto rounded-md border border-gray-200 bg-white xl:min-h-0"
+						className="h-48 min-h-0 flex-none overflow-y-auto xl:h-auto xl:flex-1 rounded-md border border-gray-200 bg-white xl:min-h-0"
 						role="listbox"
 						aria-label={t('selectRoute')}
 					>
@@ -163,8 +165,9 @@ export function PlaygroundSetupPanel({
 							filteredRoutes.map((r) => {
 								const active = selectedId === r.id;
 								const modelLabel = r.model_name || r.model_id;
-								const providerLabel = r.provider_name || r.provider_id;
+								const providerLabel = providerLabelFor(r);
 								const operation = `${r.upstream_protocol}.${r.upstream_operation ?? '*'}`;
+								const routeMeta = [operation, r.route_group].filter(Boolean).join(' · ');
 								return (
 									<button
 										key={r.id}
@@ -190,8 +193,11 @@ export function PlaygroundSetupPanel({
 											</span>
 											<span className="truncate text-sm font-medium text-gray-900">{modelLabel}</span>
 										</div>
-										<div className="w-full truncate text-[11px] text-gray-500">
-											{providerLabel} · {operation} · {r.route_group}
+										<div className="w-full truncate text-[11px] leading-4 text-gray-600" title={providerLabel}>
+											{providerLabel}
+										</div>
+										<div className="w-full truncate text-[11px] leading-4 text-gray-400" title={routeMeta}>
+											{routeMeta}
 										</div>
 									</button>
 								);
@@ -207,8 +213,11 @@ export function PlaygroundSetupPanel({
 				</div>
 			</section>
 
-			<section className={`${panelClass} shrink-0 xl:max-h-[40%] xl:overflow-y-auto`}>
-				<h2 className="text-sm font-semibold text-gray-900">{t('selectedRoute')}</h2>
+			<details className={`${panelClass} shrink-0 xl:max-h-[40%] xl:overflow-y-auto`}>
+				<summary className="cursor-pointer text-sm font-semibold text-gray-900">
+					{t('selectedRoute')}
+					{selected ? <span className="mt-1 block truncate text-xs font-normal text-gray-500">{selected.model_name ?? selected.model_id}</span> : null}
+				</summary>
 				{selected ? (
 					<div className="space-y-3">
 						{!isRouteActive(selected.status) ? (
@@ -219,7 +228,7 @@ export function PlaygroundSetupPanel({
 								{selected.model_name ?? selected.model_id}
 							</ReadonlyField>
 							<ReadonlyField label={t('provider')}>
-								{selected.provider_name ?? selected.provider_id}
+								{providerLabelFor(selected)}
 							</ReadonlyField>
 							<ReadonlyField label={t('upstreamOperation')}>
 								{selected.upstream_protocol}.{selected.upstream_operation ?? '*'}
@@ -257,7 +266,7 @@ export function PlaygroundSetupPanel({
 				) : (
 					<p className="text-sm text-gray-500">{t('chooseRouteHint')}</p>
 				)}
-			</section>
+			</details>
 		</div>
 	);
 }

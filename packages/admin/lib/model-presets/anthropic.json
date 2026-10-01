@@ -1,5 +1,99 @@
 [
 	{
+		"id": "claude-sonnet-5-5",
+		"display_name": "Claude Sonnet 5.5",
+		"description": "Anthropic's faster Sonnet for coding, agents, and professional work. Adaptive thinking is on by default and cannot be fully disabled; the default effort is high, and between_tools turns off up-front thinking at high effort or below. Forced tool_choice values any and tool return an error, as do non-default temperature, top_p, and top_k.",
+		"i18n": {
+			"en": "Anthropic's faster Sonnet for coding, agents, and professional work. Adaptive thinking is on by default and cannot be fully disabled; the default effort is high, and between_tools turns off up-front thinking at high effort or below. Forced tool_choice values any and tool return an error, as do non-default temperature, top_p, and top_k.",
+			"zh": "更快的 Sonnet，面向编程、Agent 与专业工作。自适应思考默认开启且不能完全关闭，默认 effort 为 high；between_tools 可在 high 及以下关闭前置思考。tool_choice 的 any 与 tool，以及非默认的 temperature、top_p、top_k 都会返回错误。"
+		},
+		"vendor": "anthropic",
+		"context_window": 1000000,
+		"max_tokens": 128000,
+		"pricing": {
+			"usd": {
+				"tiers": [
+					{
+						"upto": null,
+						"input_price": 2,
+						"output_price": 10,
+						"cache_read_price": 0.2,
+						"cache_write_price": 2.5
+					}
+				]
+			},
+			"cny": {
+				"tiers": [
+					{
+						"upto": null,
+						"input_price": 14,
+						"output_price": 70,
+						"cache_read_price": 1.4,
+						"cache_write_price": 17.5
+					}
+				]
+			}
+		},
+		"modalities": {
+			"input": [
+				"text",
+				"image",
+				"file"
+			],
+			"output": [
+				"text"
+			]
+		},
+		"released": "2026-09-28"
+	},
+	{
+		"id": "claude-opus-5-5",
+		"display_name": "Claude Opus 5.5",
+		"description": "Anthropic's model for long-running agentic coding and knowledge work. Adaptive thinking is always on and cannot be disabled; the default effort is medium. Forced tool_choice values any and tool return an error.",
+		"i18n": {
+			"en": "Anthropic's model for long-running agentic coding and knowledge work. Adaptive thinking is always on and cannot be disabled; the default effort is medium. Forced tool_choice values any and tool return an error.",
+			"zh": "面向长时间 Agent 编程与知识工作的 Anthropic 模型。自适应思考始终开启且不能关闭，默认 effort 为 medium。tool_choice 的 any 与 tool 会返回错误，应使用 auto 或 none。"
+		},
+		"vendor": "anthropic",
+		"context_window": 1000000,
+		"max_tokens": 128000,
+		"pricing": {
+			"usd": {
+				"tiers": [
+					{
+						"upto": null,
+						"input_price": 4,
+						"output_price": 20,
+						"cache_read_price": 0.2,
+						"cache_write_price": 5
+					}
+				]
+			},
+			"cny": {
+				"tiers": [
+					{
+						"upto": null,
+						"input_price": 28,
+						"output_price": 140,
+						"cache_read_price": 1.4,
+						"cache_write_price": 35
+					}
+				]
+			}
+		},
+		"modalities": {
+			"input": [
+				"text",
+				"image",
+				"file"
+			],
+			"output": [
+				"text"
+			]
+		},
+		"released": "2026-09-22"
+	},
+	{
 		"id": "claude-fable-5-1",
 		"display_name": "Claude Fable 5.1",
 		"description": "Anthropic's successor to Claude Fable 5 for long-running agentic coding, multistep research, and document work. Adaptive thinking is always on; input and output prices match Fable 5, with cheaper prompt-cache reads.",
@@ -109,10 +203,10 @@
 				"tiers": [
 					{
 						"upto": null,
-						"input_price": 3,
-						"output_price": 15,
-						"cache_read_price": 0.3,
-						"cache_write_price": 3.75
+						"input_price": 2,
+						"output_price": 10,
+						"cache_read_price": 0.2,
+						"cache_write_price": 2.5
 					}
 				]
 			},
@@ -120,10 +214,10 @@
 				"tiers": [
 					{
 						"upto": null,
-						"input_price": 21,
-						"output_price": 105,
-						"cache_read_price": 2.1,
-						"cache_write_price": 26.25
+						"input_price": 14,
+						"output_price": 70,
+						"cache_read_price": 1.4,
+						"cache_write_price": 17.5
 					}
 				]
 			}
