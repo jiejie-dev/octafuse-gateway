@@ -89,6 +89,8 @@ export type ModelRouteDetailRow = ModelRouteRow & { created_at?: string };
 export interface ProviderAdminRow {
 	id: string;
 	name: string;
+	/** 导入模板英文名、`__custom__`，或空字符串（尚未分类）。与 `name` 联合唯一。 */
+	kind?: string | null;
 	/** 协议端点 JSON（权威） */
 	endpoints: string | null;
 	/** 上游 API Key（管理端稍后脱敏） */
@@ -126,7 +128,12 @@ export interface ModelAnalyticsRow {
 	content_ttft_rate: number;
 	avg_upstream_response_ms: number | null;
 	tokens_per_second: number | null;
+	stream_tokens_per_second?: number | null;
+	stream_sample_count?: number;
 	failover_rate: number;
+	/** Requests with at least one failover; legacy failover_rate counts events per 100 requests. */
+	failover_request_count?: number;
+	failover_request_rate?: number;
 	avg_attempts: number | null;
 }
 
@@ -189,7 +196,12 @@ export interface ProviderAnalyticsRow {
 	content_ttft_rate: number;
 	avg_upstream_response_ms: number | null;
 	tokens_per_second: number | null;
+	stream_tokens_per_second?: number | null;
+	stream_sample_count?: number;
 	failover_rate: number;
+	/** Requests with at least one failover; legacy failover_rate counts events per 100 requests. */
+	failover_request_count?: number;
+	failover_request_rate?: number;
 	avg_attempts: number | null;
 }
 
@@ -251,6 +263,9 @@ export interface ProviderReliabilityRow {
 	avg_latency_ms: number | null;
 	avg_upstream_response_ms: number | null;
 	failover_rate: number;
+	/** Requests with at least one failover; legacy failover_rate counts events per 100 requests. */
+	failover_request_count?: number;
+	failover_request_rate?: number;
 	avg_attempts: number | null;
 	charged_cost: number;
 	metered_cost: number;
@@ -267,6 +282,9 @@ export interface ModelProviderReliabilityRow {
 	avg_latency_ms: number | null;
 	avg_upstream_response_ms: number | null;
 	failover_rate: number;
+	/** Requests with at least one failover; legacy failover_rate counts events per 100 requests. */
+	failover_request_count?: number;
+	failover_request_rate?: number;
 	avg_attempts: number | null;
 	charged_cost: number;
 	metered_cost: number;

@@ -60,6 +60,186 @@
 		"released": "2026-09-04"
 	},
 	{
+		"id": "gpt-6-sol",
+		"display_name": "GPT-6 Sol",
+		"description": "A GPT-6 model for complex coding and agentic workflows. reasoning.effort supports none, low, medium (default), high, xhigh, and max. Built-in tools and function calling should use the Responses API; Chat Completions supports function calling only when reasoning_effort is none.",
+		"i18n": {
+			"en": "A GPT-6 model for complex coding and agentic workflows. reasoning.effort supports none, low, medium (default), high, xhigh, and max. Built-in tools and function calling should use the Responses API; Chat Completions supports function calling only when reasoning_effort is none.",
+			"zh": "面向复杂编程与 Agent 工作流的 GPT-6 模型。reasoning.effort 支持 none、low、medium（默认）、high、xhigh 和 max。内置工具与函数调用应走 Responses API；Chat Completions 仅在 reasoning_effort 为 none 时支持函数调用。"
+		},
+		"vendor": "openai",
+		"context_window": 1050000,
+		"max_tokens": 128000,
+		"pricing": {
+			"usd": {
+				"tiers": [
+					{
+						"upto": 272000,
+						"input_price": 2,
+						"output_price": 10,
+						"cache_read_price": 0.2,
+						"cache_write_price": 2.5
+					},
+					{
+						"upto": null,
+						"input_price": 4,
+						"output_price": 15,
+						"cache_read_price": 0.4,
+						"cache_write_price": 5
+					}
+				]
+			},
+			"cny": {
+				"tiers": [
+					{
+						"upto": 272000,
+						"input_price": 14,
+						"output_price": 70,
+						"cache_read_price": 1.4,
+						"cache_write_price": 17.5
+					},
+					{
+						"upto": null,
+						"input_price": 28,
+						"output_price": 105,
+						"cache_read_price": 2.8,
+						"cache_write_price": 35
+					}
+				]
+			}
+		},
+		"modalities": {
+			"input": [
+				"text",
+				"image"
+			],
+			"output": [
+				"text"
+			]
+		},
+		"released": "2026-09-22"
+	},
+	{
+		"id": "gpt-6.1-sol",
+		"display_name": "GPT-6.1 Sol",
+		"description": "An upgrade to GPT-6 Sol with near-Astra performance for complex coding, computer use, and professional work. reasoning.effort supports low, medium (default), high, xhigh, and max (none and minimal are not supported). Tool calling requires the Responses API; Chat Completions supports requests without tools.",
+		"i18n": {
+			"en": "An upgrade to GPT-6 Sol with near-Astra performance for complex coding, computer use, and professional work. reasoning.effort supports low, medium (default), high, xhigh, and max (none and minimal are not supported). Tool calling requires the Responses API; Chat Completions supports requests without tools.",
+			"zh": "GPT-6 Sol 的升级型号，在复杂编程、计算机使用与专业工作上接近 Astra。reasoning.effort 支持 low、medium（默认）、high、xhigh 和 max，不支持 none 与 minimal。带工具调用必须走 Responses API；Chat Completions 仅支持不带工具的请求。"
+		},
+		"vendor": "openai",
+		"context_window": 1050000,
+		"max_tokens": 128000,
+		"pricing": {
+			"usd": {
+				"tiers": [
+					{
+						"upto": 272000,
+						"input_price": 2,
+						"output_price": 10,
+						"cache_read_price": 0.1,
+						"cache_write_price": 2.5
+					},
+					{
+						"upto": null,
+						"input_price": 4,
+						"output_price": 15,
+						"cache_read_price": 0.2,
+						"cache_write_price": 5
+					}
+				]
+			},
+			"cny": {
+				"tiers": [
+					{
+						"upto": 272000,
+						"input_price": 14,
+						"output_price": 70,
+						"cache_read_price": 0.7,
+						"cache_write_price": 17.5
+					},
+					{
+						"upto": null,
+						"input_price": 28,
+						"output_price": 105,
+						"cache_read_price": 1.4,
+						"cache_write_price": 35
+					}
+				]
+			}
+		},
+		"modalities": {
+			"input": [
+				"text",
+				"image"
+			],
+			"output": [
+				"text"
+			]
+		},
+		"released": "2026-09-29"
+	},
+	{
+		"id": "gpt-6-luna",
+		"display_name": "GPT-6 Luna",
+		"description": "OpenAI's most efficient GPT-6 model for focused, high-volume tasks. reasoning.effort supports none, low, medium (default), high, xhigh, and max. Built-in tools and function calling should use the Responses API; Chat Completions supports function calling only when reasoning_effort is none.",
+		"i18n": {
+			"en": "OpenAI's most efficient GPT-6 model for focused, high-volume tasks. reasoning.effort supports none, low, medium (default), high, xhigh, and max. Built-in tools and function calling should use the Responses API; Chat Completions supports function calling only when reasoning_effort is none.",
+			"zh": "面向聚焦、高并发任务的高效 GPT-6 模型。reasoning.effort 支持 none、low、medium（默认）、high、xhigh 和 max。内置工具与函数调用应走 Responses API；Chat Completions 仅在 reasoning_effort 为 none 时支持函数调用。"
+		},
+		"vendor": "openai",
+		"context_window": 1050000,
+		"max_tokens": 128000,
+		"pricing": {
+			"usd": {
+				"tiers": [
+					{
+						"upto": 272000,
+						"input_price": 0.1,
+						"output_price": 0.5,
+						"cache_read_price": 0.01,
+						"cache_write_price": 0.125
+					},
+					{
+						"upto": null,
+						"input_price": 0.2,
+						"output_price": 0.75,
+						"cache_read_price": 0.02,
+						"cache_write_price": 0.25
+					}
+				]
+			},
+			"cny": {
+				"tiers": [
+					{
+						"upto": 272000,
+						"input_price": 0.7,
+						"output_price": 3.5,
+						"cache_read_price": 0.07,
+						"cache_write_price": 0.875
+					},
+					{
+						"upto": null,
+						"input_price": 1.4,
+						"output_price": 5.25,
+						"cache_read_price": 0.14,
+						"cache_write_price": 1.75
+					}
+				]
+			}
+		},
+		"modalities": {
+			"input": [
+				"text",
+				"image"
+			],
+			"output": [
+				"text"
+			]
+		},
+		"released": "2026-09-22"
+	},
+	{
 		"id": "gpt-5.2",
 		"display_name": "GPT-5.2",
 		"description": "A frontier GPT model with adaptive reasoning for coding, agents, and long-context work. Adaptive reasoning allocates computation according to task difficulty for stronger agent and long-context performance.",
@@ -453,17 +633,17 @@
 				"tiers": [
 					{
 						"upto": 272000,
-						"input_price": 2.5,
-						"output_price": 15,
-						"cache_read_price": 0.25,
-						"cache_write_price": 3.125
+						"input_price": 2,
+						"output_price": 12,
+						"cache_read_price": 0.2,
+						"cache_write_price": 2.5
 					},
 					{
 						"upto": null,
-						"input_price": 5,
-						"output_price": 22.5,
-						"cache_read_price": 0.5,
-						"cache_write_price": 6.25
+						"input_price": 4,
+						"output_price": 18,
+						"cache_read_price": 0.4,
+						"cache_write_price": 5
 					}
 				]
 			},
@@ -471,17 +651,17 @@
 				"tiers": [
 					{
 						"upto": 272000,
-						"input_price": 17.5,
-						"output_price": 105,
-						"cache_read_price": 1.75,
-						"cache_write_price": 21.875
+						"input_price": 14,
+						"output_price": 84,
+						"cache_read_price": 1.4,
+						"cache_write_price": 17.5
 					},
 					{
 						"upto": null,
-						"input_price": 35,
-						"output_price": 157.5,
-						"cache_read_price": 3.5,
-						"cache_write_price": 43.75
+						"input_price": 28,
+						"output_price": 126,
+						"cache_read_price": 2.8,
+						"cache_write_price": 35
 					}
 				]
 			}
@@ -513,17 +693,17 @@
 				"tiers": [
 					{
 						"upto": 272000,
-						"input_price": 1,
-						"output_price": 6,
-						"cache_read_price": 0.1,
-						"cache_write_price": 1.25
+						"input_price": 0.2,
+						"output_price": 1.2,
+						"cache_read_price": 0.02,
+						"cache_write_price": 0.25
 					},
 					{
 						"upto": null,
-						"input_price": 2,
-						"output_price": 9,
-						"cache_read_price": 0.2,
-						"cache_write_price": 2.5
+						"input_price": 0.4,
+						"output_price": 1.8,
+						"cache_read_price": 0.04,
+						"cache_write_price": 0.5
 					}
 				]
 			},
@@ -531,17 +711,17 @@
 				"tiers": [
 					{
 						"upto": 272000,
-						"input_price": 7,
-						"output_price": 42,
-						"cache_read_price": 0.7,
-						"cache_write_price": 8.75
+						"input_price": 1.4,
+						"output_price": 8.4,
+						"cache_read_price": 0.14,
+						"cache_write_price": 1.75
 					},
 					{
 						"upto": null,
-						"input_price": 14,
-						"output_price": 63,
-						"cache_read_price": 1.4,
-						"cache_write_price": 17.5
+						"input_price": 2.8,
+						"output_price": 12.6,
+						"cache_read_price": 0.28,
+						"cache_write_price": 3.5
 					}
 				]
 			}

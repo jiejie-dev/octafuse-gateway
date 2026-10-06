@@ -46,6 +46,8 @@ import {
 } from '@octafuse/core/adapters/registry';
 import {
 	findDailyWindowOverlap,
+	coerceProviderFactorValidity,
+	isProviderFactorActive,
 	formatIsoWeekdaysHint,
 	mergeScheduleSidesToSharedWindows,
 	normalizeIsoWeekdays,
@@ -53,12 +55,20 @@ import {
 	parseHhMmToMinutes,
 	parseRouteBaseFactors,
 	parseRoutePricingSchedule,
+	resolveProviderFactorValidity,
 	scheduleWindowKey,
+	type ProviderFactorValidity,
 	type DailyScheduleWindow,
 	type SharedScheduleWindow,
 } from '@octafuse/core/db/pricing-schedule';
 import { compareModelsByReleasedAtDesc } from '@/lib/model-catalog-sort';
 import { getModelVendorLabel, normalizeModelVendorInput } from '@/lib/model-vendor';
+import {
+	compareProvidersByKindThenName,
+	liveProviderAccountLabel,
+	providerKindFilterKey,
+	type ProviderKindSortable,
+} from '@/lib/provider-kind';
 import { compareRouteGroupsForDisplay, normalizeRouteGroup } from '@/lib/route-group-ui';
 import { UPSTREAM_PROTOCOLS, isUpstreamProtocol, type UpstreamProtocol } from '@/lib/upstream-protocol';
 import type { GatewayModel, GatewayModelRoute, GatewayProvider } from '@/lib/types';
@@ -323,26 +333,59 @@ export function groupSectionsByRequestSurface<T>(
 	});
 }
 
-/** Same-priority layer: active first, then weight DESC, then name / id. */
+export type RoutePrioritySortContext = {
+	providersById: ReadonlyMap<string, ProviderKindSortable>;
+	locale: string;
+	customKindLabel: string;
+};
+
+type PriorityLayerRoute = Pick<GatewayModelRoute, 'status' | 'weight' | 'provider_id' | 'id'> & {
+	provider_name?: string | null;
+};
+
+function providerForPrioritySort(
+	route: PriorityLayerRoute,
+	providersById: ReadonlyMap<string, ProviderKindSortable>,
+): ProviderKindSortable {
+	const provider = providersById.get(route.provider_id);
+	const snapshotName = route.provider_name?.trim() || route.provider_id;
+	if (!provider) return { name: snapshotName, kind: '' };
+	return {
+		name: provider.name?.trim() || snapshotName,
+		kind: provider.kind,
+		kind_labels: provider.kind_labels,
+	};
+}
+
+/** Same-priority layer: active first, weight DESC, then provider kind and account name. */
 export function compareRoutesWithinPriorityLayer(
-	a: Pick<GatewayModelRoute, 'status' | 'weight' | 'provider_model_name' | 'id'>,
-	b: Pick<GatewayModelRoute, 'status' | 'weight' | 'provider_model_name' | 'id'>,
+	a: PriorityLayerRoute,
+	b: PriorityLayerRoute,
+	context: RoutePrioritySortContext,
 ): number {
 	const enabledA = a.status === 'active' ? 1 : 0;
 	const enabledB = b.status === 'active' ? 1 : 0;
 	if (enabledB !== enabledA) return enabledB - enabledA;
 	const dw = (b.weight ?? 1) - (a.weight ?? 1);
 	if (dw !== 0) return dw;
-	const nameCmp = a.provider_model_name.localeCompare(b.provider_model_name, undefined, {
-		sensitivity: 'base',
-	});
-	if (nameCmp !== 0) return nameCmp;
-	return a.id.localeCompare(b.id, undefined, { sensitivity: 'base' });
+	const byProvider = compareProvidersByKindThenName(
+		providerForPrioritySort(a, context.providersById),
+		providerForPrioritySort(b, context.providersById),
+		context.locale,
+		context.customKindLabel,
+	);
+	if (byProvider !== 0) return byProvider;
+	return a.id.localeCompare(b.id, context.locale, { sensitivity: 'base' });
 }
 
 export function compareModelRoutesForCardDisplay(
-	a: Pick<GatewayModelRoute, 'upstream_protocol' | 'priority' | 'status' | 'weight' | 'provider_model_name' | 'id'>,
-	b: Pick<GatewayModelRoute, 'upstream_protocol' | 'priority' | 'status' | 'weight' | 'provider_model_name' | 'id'>,
+	a: Pick<GatewayModelRoute, 'upstream_protocol' | 'priority' | 'status' | 'weight' | 'provider_id' | 'id'> & {
+		provider_name?: string | null;
+	},
+	b: Pick<GatewayModelRoute, 'upstream_protocol' | 'priority' | 'status' | 'weight' | 'provider_id' | 'id'> & {
+		provider_name?: string | null;
+	},
+	context: RoutePrioritySortContext,
 ): number {
 	const knownA = isUpstreamProtocol(a.upstream_protocol);
 	const knownB = isUpstreamProtocol(b.upstream_protocol);
@@ -360,7 +403,7 @@ export function compareModelRoutesForCardDisplay(
 	}
 	const dp = b.priority - a.priority;
 	if (dp !== 0) return dp;
-	return compareRoutesWithinPriorityLayer(a, b);
+	return compareRoutesWithinPriorityLayer(a, b, context);
 }
 
 export function compareModelVendorsForDisplay(a: string, b: string): number {
@@ -462,6 +505,45 @@ function parseNonNegativeFactorText(text: string, fieldLabel: string): number {
 	return n;
 }
 
+/** Preview each row's factors at the current date, before the catalog multiplier. */
+export function previewRouteBillingFactors(
+	factors: Pick<RouteFormData, 'charged_factor' | 'metered_factor' | 'provider_factor'>,
+	validity: ProviderFactorValidity,
+	now: Date,
+	scheduled = false
+): { charged: number | null; metered: number | null; provider: number | null; providerInactive: boolean } {
+	const resolved = resolveProviderFactorValidity(
+		{ providerStartsAt: null, providerExpiresAt: null, providerWindowInvalid: false },
+		{ start: '00:00', end: '24:00', factor: 1, validity }
+	);
+	const parse = (value: string, requireValue: boolean) => {
+		if (requireValue && !value.trim()) return null;
+		try {
+			return parseNonNegativeFactorText(value, 'Factor');
+		} catch {
+			return null;
+		}
+	};
+	const providerInactive = !isProviderFactorActive(resolved, now);
+	const provider = resolved.providerWindowInvalid
+		? null
+		: providerInactive
+		? 1
+		: parse(factors.provider_factor, false);
+	const combine = (value: string) => {
+		const factor = parse(value, scheduled);
+		if (provider == null || factor == null) return null;
+		const product = provider * factor;
+		return Number.isFinite(product) ? Number(product.toPrecision(12)) : null;
+	};
+	return {
+		charged: combine(factors.charged_factor),
+		metered: combine(factors.metered_factor),
+		provider,
+		providerInactive,
+	};
+}
+
 function parseSharedWindowFactor(text: string, fieldLabel: string, index: number): number {
 	const factor = text.trim() === '' ? Number.NaN : Number(text.trim());
 	if (!Number.isFinite(factor) || factor < 0) {
@@ -470,19 +552,65 @@ function parseSharedWindowFactor(text: string, fieldLabel: string, index: number
 	return factor;
 }
 
+function parseOptionalIsoTimestamp(text: string | undefined, fieldLabel: string): string | undefined {
+	const trimmed = text?.trim() ?? '';
+	if (trimmed === '') {
+		return undefined;
+	}
+	const parsed = new Date(trimmed);
+	if (Number.isNaN(parsed.getTime())) {
+		throw new Error(`${fieldLabel} must be an ISO-8601 timestamp`);
+	}
+	return parsed.toISOString();
+}
+
+/** Materialize legacy inherited dates before editing, so each visible row is independent. */
+export function independentProviderWindows(form: RouteFormData, windows: RouteScheduleFormWindow[]) {
+	return windows.map((w) => ({ ...w, provider_validity: w.provider_validity ?? {
+		...(form.provider_factor_starts_at ? { starts_at: form.provider_factor_starts_at } : {}),
+		...(form.provider_factor_expires_at ? { expires_at: form.provider_factor_expires_at } : {}),
+	} }));
+}
+
 export function buildRoutePriceOverride(formData: RouteFormData): Record<string, unknown> {
 	const chargedFactor = parseNonNegativeFactorText(formData.charged_factor, 'Charged factor');
 	const meteredFactor = parseNonNegativeFactorText(formData.metered_factor, 'Metered factor');
-	const scheduleWindows = validateSharedScheduleWindows(formData.schedule_windows);
+	const providerFactor = parseNonNegativeFactorText(formData.provider_factor, 'Provider factor');
+	const startsAt = parseOptionalIsoTimestamp(formData.provider_factor_starts_at, 'Provider factor start');
+	const expiresAt = parseOptionalIsoTimestamp(formData.provider_factor_expires_at, 'Provider factor end');
+	if (startsAt && expiresAt && startsAt >= expiresAt) {
+		throw new Error('Provider factor start must be earlier than end');
+	}
+	const scheduleWindows = validateSharedScheduleWindows(formData.schedule_windows, providerFactor);
 	const priceOverride: Record<string, unknown> = {
 		charged_factor: chargedFactor,
 		metered_factor: meteredFactor,
 	};
+	if (providerFactor !== 1 || startsAt || expiresAt) {
+		priceOverride.provider_factor = providerFactor;
+	}
+	if (startsAt) {
+		priceOverride.provider_factor_starts_at = startsAt;
+	}
+	if (expiresAt) {
+		priceOverride.provider_factor_expires_at = expiresAt;
+	}
 	if (scheduleWindows.length > 0) {
+		const providerSide = scheduleWindows.some(
+			(w) => w.provider_factor !== providerFactor || w.provider_validity !== undefined
+		);
 		priceOverride.schedule = {
 			mode: 'override',
 			charged: scheduleWindows.map((w) => persistScheduleSideWindow(w, w.charged_factor)),
 			metered: scheduleWindows.map((w) => persistScheduleSideWindow(w, w.metered_factor)),
+			...(providerSide
+				? {
+						provider: scheduleWindows.map((w) => ({
+							...persistScheduleSideWindow(w, w.provider_factor),
+							...(w.provider_validity !== undefined ? { validity: w.provider_validity } : {}),
+						})),
+				  }
+				: {}),
 		};
 	}
 	return priceOverride;
@@ -532,7 +660,10 @@ function parseFormScheduleDays(days: number[] | undefined, index: number): numbe
 	return normalized;
 }
 
-function validateSharedScheduleWindows(windows: RouteScheduleFormSide): SharedScheduleWindow[] {
+function validateSharedScheduleWindows(
+	windows: RouteScheduleFormSide,
+	providerFallback: number,
+): SharedScheduleWindow[] {
 	const cleaned: SharedScheduleWindow[] = [];
 	for (let i = 0; i < windows.length; i++) {
 		const w = windows[i]!;
@@ -549,12 +680,20 @@ function validateSharedScheduleWindows(windows: RouteScheduleFormSide): SharedSc
 			);
 		}
 		const days = parseFormScheduleDays(w.days, i);
+		const validity =
+			w.provider_validity === undefined ? undefined : coerceProviderFactorValidity(w.provider_validity);
+		if (validity && !validity.ok) throw new Error(`Schedule window ${i + 1}: ${validity.message}`);
 		cleaned.push({
 			start,
 			end,
 			charged_factor: parseSharedWindowFactor(w.charged_factor, 'Charged factor', i),
 			metered_factor: parseSharedWindowFactor(w.metered_factor, 'Metered factor', i),
+			provider_factor:
+				w.provider_factor == null || w.provider_factor.trim() === ''
+					? providerFallback
+					: parseSharedWindowFactor(w.provider_factor, 'Provider factor', i),
 			...(days ? { days } : {}),
+			...(validity?.ok ? { provider_validity: validity.validity } : {}),
 		});
 	}
 	const overlap = findDailyWindowOverlap(
@@ -579,7 +718,8 @@ export function catalogScheduleWindowsFromModel(
 export function alignRouteScheduleWindowsToCatalog(
 	catalog: DailyScheduleWindow[],
 	existing: RouteScheduleFormWindow[],
-	defaultFactor = '1'
+	defaultFactor = '1',
+	defaultProviderFactor = defaultFactor,
 ): RouteScheduleFormWindow[] {
 	if (catalog.length === 0) {
 		return existing;
@@ -593,6 +733,8 @@ export function alignRouteScheduleWindowsToCatalog(
 			days: w.days ? [...w.days] : [],
 			charged_factor: prev?.charged_factor ?? defaultFactor,
 			metered_factor: prev?.metered_factor ?? defaultFactor,
+			provider_factor: prev?.provider_factor ?? defaultProviderFactor,
+			...(prev?.provider_validity !== undefined ? { provider_validity: { ...prev.provider_validity } } : {}),
 		};
 	});
 }
@@ -678,14 +820,52 @@ export function routeHasCustomParamsForceOverride(raw: string | null | undefined
 
 export function buildFormDataFromRoute(route: GatewayModelRoute, models: GatewayModel[]): RouteFormData {
 	const factors = parseRouteBaseFactors(route.price_override ?? null);
+	const schedule = parseRoutePricingSchedule(route.price_override);
 	const existingWindows = resolveRouteScheduleDisplay(route.price_override).map((w) => ({
 		start: w.start,
 		end: w.end,
 		charged_factor: formatScheduleFactorText(w.charged_factor),
 		metered_factor: formatScheduleFactorText(w.metered_factor),
+		provider_factor: formatScheduleFactorText(w.provider_factor),
+		...(w.provider_validity !== undefined
+			? { provider_validity: { ...w.provider_validity } }
+			: factors.providerStartsAt || factors.providerExpiresAt
+			? {
+					provider_validity: {
+						...(factors.providerStartsAt ? { starts_at: factors.providerStartsAt } : {}),
+						...(factors.providerExpiresAt ? { expires_at: factors.providerExpiresAt } : {}),
+					},
+			  }
+			: {}),
 		days: w.days ?? [],
 	}));
 	const catalog = catalogScheduleWindowsFromModel(models.find((m) => m.id === route.model_id));
+	const alignedWindows = alignRouteScheduleWindowsToCatalog(
+		catalog,
+		existingWindows,
+		'1',
+		String(factors.providerFactor)
+	);
+	// Display merging may combine adjacent equal-rate rows. Restore exact catalog rows when editing,
+	// including their independent validity, instead of replacing them with default multipliers.
+	if (catalog.length > 0) {
+		for (const window of alignedWindows) {
+			const key = scheduleWindowKey(window);
+			for (const [side, base] of [
+				['charged', factors.chargedFactor],
+				['metered', factors.meteredFactor],
+				['provider', factors.providerFactor],
+			] as const) {
+				const match = schedule[side].find((w) => scheduleWindowKey(w) === key);
+				if (match)
+					window[`${side}_factor`] = formatScheduleFactorText(
+						match.factor * (schedule.mode === 'multiply' ? base : 1)
+					);
+			}
+			const provider = schedule.provider.find((w) => scheduleWindowKey(w) === key);
+			if (provider?.validity !== undefined) window.provider_validity = { ...provider.validity };
+		}
+	}
 	return {
 		model_id: route.model_id,
 		provider_id: route.provider_id,
@@ -710,7 +890,10 @@ export function buildFormDataFromRoute(route: GatewayModelRoute, models: Gateway
 		route_group: route.route_group ?? 'default',
 		charged_factor: String(factors.chargedFactor),
 		metered_factor: String(factors.meteredFactor),
-		schedule_windows: alignRouteScheduleWindowsToCatalog(catalog, existingWindows),
+		provider_factor: String(factors.providerFactor),
+		provider_factor_starts_at: factors.providerStartsAt ?? '',
+		provider_factor_expires_at: factors.providerExpiresAt ?? '',
+		schedule_windows: alignedWindows,
 	};
 }
 
@@ -1111,9 +1294,14 @@ export function buildRoutesByModel(params: {
 	modelMeta: Map<string, GatewayModel>;
 	filterVendor: string;
 	filterProviderId: string;
+	filterProviderKind?: string;
+	providers?: Array<Pick<GatewayProvider, 'id' | 'name' | 'kind' | 'kind_labels'>>;
+	locale?: string;
+	customKindLabel?: string;
 	filterRouteGroup: string;
 	filterStatus: string;
 	filterKind?: RouteKindFilter;
+	searchQuery?: string;
 }): RouteModelGroup[] {
 	const {
 		routes,
@@ -1121,10 +1309,22 @@ export function buildRoutesByModel(params: {
 		modelMeta,
 		filterVendor,
 		filterProviderId,
+		filterProviderKind = '',
+		providers = [],
+		locale = 'en',
+		customKindLabel = 'Custom',
 		filterRouteGroup,
 		filterStatus,
 		filterKind = DEFAULT_ROUTE_KIND_FILTER,
+		searchQuery = '',
 	} = params;
+	const searchTerms = searchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
+	const providerKindById = new Map(providers.map((provider) => [provider.id, provider.kind]));
+	const routeSortContext: RoutePrioritySortContext = {
+		providersById: new Map(providers.map((provider) => [provider.id, provider])),
+		locale,
+		customKindLabel,
+	};
 
 	const modelMatchesVendor = (modelId: string) => {
 		if (!filterVendor) return true;
@@ -1138,6 +1338,10 @@ export function buildRoutesByModel(params: {
 		if (!modelMatchesVendor(r.model_id)) continue;
 		if (!modelMatchesKind(r.model_id)) continue;
 		if (filterProviderId && r.provider_id !== filterProviderId) continue;
+		if (filterProviderKind) {
+			if (!providerKindById.has(r.provider_id)) continue;
+			if (providerKindFilterKey(providerKindById.get(r.provider_id)) !== filterProviderKind) continue;
+		}
 		if (filterStatus && r.status !== filterStatus) continue;
 		if (filterRouteGroup && normalizeRouteGroup(r.route_group) !== filterRouteGroup) continue;
 		const list = routeByModelId.get(r.model_id) ?? [];
@@ -1146,7 +1350,7 @@ export function buildRoutesByModel(params: {
 	}
 
 	for (const list of routeByModelId.values()) {
-		list.sort(compareModelRoutesForCardDisplay);
+		list.sort((a, b) => compareModelRoutesForCardDisplay(a, b, routeSortContext));
 	}
 
 	const candidateModelIds = new Set<string>();
@@ -1161,7 +1365,7 @@ export function buildRoutesByModel(params: {
 		candidateModelIds.add(route.model_id);
 	}
 
-	const hasRouteLevelFilter = Boolean(filterProviderId || filterStatus || filterRouteGroup);
+	const hasRouteLevelFilter = Boolean(filterProviderId || filterProviderKind || filterStatus || filterRouteGroup);
 	const entries = [...candidateModelIds].sort((idA, idB) => {
 		const nameA = modelMeta.get(idA)?.display_name || idA;
 		const nameB = modelMeta.get(idB)?.display_name || idB;
@@ -1178,6 +1382,11 @@ export function buildRoutesByModel(params: {
 			const meta = modelMeta.get(model_id);
 			const title = meta?.display_name || groupRoutes[0]?.model_name || model_id;
 			const vendor = normalizeModelVendorInput(meta?.vendor);
+			const searchText = [model_id, title, ...groupRoutes.flatMap(route => [
+				route.provider_model_name, route.provider_name, route.model_name,
+				routeSortContext.providersById?.get(route.provider_id)?.name,
+			])].filter(Boolean).join(' ').toLowerCase();
+			if (!searchTerms.every(term => searchText.includes(term))) return null;
 			return { model_id, title, groupRoutes, activeCount: active, vendor };
 		})
 		.filter((group): group is RouteModelGroup => group !== null);
@@ -1308,16 +1517,29 @@ export function buildActiveFilterSummary(params: {
 	filterRouteGroup: string;
 	filterVendor: string;
 	filterProviderId: string;
+	filterProviderKindLabel?: string;
 	providers: GatewayProvider[];
+	locale: string;
+	customKindLabel: string;
 }): string[] {
-	const { filterStatus, filterRouteGroup, filterVendor, filterProviderId, providers } = params;
+	const {
+		filterStatus,
+		filterRouteGroup,
+		filterVendor,
+		filterProviderId,
+		filterProviderKindLabel,
+		providers,
+		locale,
+		customKindLabel,
+	} = params;
 	const parts: string[] = [];
 	if (filterStatus) parts.push(filterStatus === 'active' ? 'Active' : 'Inactive');
 	if (filterRouteGroup) parts.push(`Group: ${filterRouteGroup}`);
 	if (filterVendor) parts.push(getModelVendorLabel(filterVendor));
+	if (filterProviderKindLabel) parts.push(filterProviderKindLabel);
 	if (filterProviderId) {
 		const p = providers.find((x) => x.id === filterProviderId);
-		parts.push(p?.name || filterProviderId);
+		parts.push(p ? liveProviderAccountLabel(p, locale, customKindLabel, filterProviderId) : filterProviderId);
 	}
 	return parts;
 }
@@ -1350,6 +1572,9 @@ export function createInitialRouteForm(models: GatewayModel[], presetModelId?: s
 		route_group: 'default',
 		charged_factor: '1',
 		metered_factor: '1',
+		provider_factor: '1',
+		provider_factor_starts_at: '',
+		provider_factor_expires_at: '',
 		schedule_windows: alignRouteScheduleWindowsToCatalog(
 			catalogScheduleWindowsFromModel(presetModel),
 			[]
@@ -1419,7 +1644,49 @@ export function resolveRouteScheduleDisplay(
 		mode: schedule.mode,
 		chargedBase: factors.chargedFactor,
 		meteredBase: factors.meteredFactor,
+		provider: schedule.provider,
+		providerBase: factors.providerFactor,
 	});
+}
+
+export type ProviderFactorTiming = 'scheduled' | 'active' | 'expired';
+
+/** 列表用：未配置供应商倍率时返回 null。 */
+export function providerFactorTiming(
+	priceOverride: string | null | undefined,
+	now: Date = new Date(),
+	window?: SharedScheduleWindow
+): ProviderFactorTiming | null {
+	const factors = parseRouteBaseFactors(priceOverride ?? null);
+	const validity = resolveProviderFactorValidity(
+		factors,
+		window
+			? {
+					start: window.start,
+					end: window.end,
+					factor: window.provider_factor,
+					...(window.provider_validity !== undefined ? { validity: window.provider_validity } : {}),
+			  }
+			: null
+	);
+	const configured =
+		(window?.provider_factor ?? factors.providerFactor) !== 1 ||
+		validity.providerStartsAt != null ||
+		validity.providerExpiresAt != null ||
+		validity.providerWindowInvalid;
+	if (!configured) {
+		return null;
+	}
+	if (validity.providerWindowInvalid) {
+		return 'expired';
+	}
+	if (isProviderFactorActive(validity, now)) {
+		return 'active';
+	}
+	if (validity.providerStartsAt != null && Date.parse(validity.providerStartsAt) > now.getTime()) {
+		return 'scheduled';
+	}
+	return 'expired';
 }
 
 export function formatSharedScheduleWindowsHint(windows: SharedScheduleWindow[]): string | null {
@@ -1427,11 +1694,13 @@ export function formatSharedScheduleWindowsHint(windows: SharedScheduleWindow[])
 	return windows
 		.map((w) => {
 			const range = formatScheduleRangeWithDays(w.start, w.end, w.days);
-			const same = w.charged_factor === w.metered_factor;
+			const same = w.charged_factor === w.metered_factor && w.provider_factor === 1;
 			if (same) {
 				return `${range} ${formatFactorMultiplier(w.charged_factor)}`;
 			}
-			return `${range} C ${formatFactorMultiplier(w.charged_factor)} · M ${formatFactorMultiplier(w.metered_factor)}`;
+			const provider =
+				w.provider_factor === 1 ? '' : ` · P ${formatFactorMultiplier(w.provider_factor)}`;
+			return `${range} C ${formatFactorMultiplier(w.charged_factor)} · M ${formatFactorMultiplier(w.metered_factor)}${provider}`;
 		})
 		.join(' · ');
 }

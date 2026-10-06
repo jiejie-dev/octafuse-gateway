@@ -5,9 +5,8 @@ import {
 	buildDisplayDiscountsByRouteGroup,
 	fillDailyScheduleGaps,
 	formatDisplayDiscountLabel,
-	isDisplayDiscountTag,
-	mergeDerivedDiscountTags,
 	pickRepresentativeRoute,
+	applyUserChargedFactorToDisplayDiscounts,
 } from './display-discount';
 
 function profileWithSchedule(
@@ -249,8 +248,8 @@ describe('buildDisplayDiscountForRoute', () => {
 	});
 });
 
-describe('buildDisplayDiscountsByRouteGroup + tags', () => {
-	it('groups by route_group and injects Discount.<group> from current composite', () => {
+describe('buildDisplayDiscountsByRouteGroup', () => {
+	it('groups by route_group from current composite', () => {
 		const discounts = buildDisplayDiscountsByRouteGroup({
 			routes: [
 				{
@@ -276,8 +275,6 @@ describe('buildDisplayDiscountsByRouteGroup + tags', () => {
 		});
 		assert.equal(discounts.default?.current.composite_factor, 0.7);
 		assert.equal(discounts.free?.current.composite_factor, 0.5);
-		const tags = mergeDerivedDiscountTags(['Hot', 'Discount:0.3', 'Discount.free:0.9'], discounts);
-		assert.deepEqual(tags, ['Hot', 'Discount.default:0.7', 'Discount.free:0.5']);
 	});
 
 	it('picks the cheapest current composite when priority and weight are tied', () => {
@@ -306,19 +303,125 @@ describe('buildDisplayDiscountsByRouteGroup + tags', () => {
 		assert.equal(discounts.default?.route.weight, 1);
 	});
 
-	it('skips derived tags when composite is full price', () => {
+	it('keeps full-price composite at 1', () => {
 		const discounts = buildDisplayDiscountsByRouteGroup({
 			routes: [{ status: 'active', priority: 0, weight: 1, route_group: 'default', price_override: null }],
 			pricingProfileJson: null,
 			timezone: 'UTC',
 		});
 		assert.equal(discounts.default?.current.composite_factor, 1);
-		assert.deepEqual(mergeDerivedDiscountTags(['pro'], discounts), ['pro']);
+	});
+});
+
+describe('applyUserChargedFactorToDisplayDiscounts', () => {
+	const catalog = {
+		default: {
+			timezone: 'Asia/Shanghai',
+			kind: 'flat' as const,
+			schedule_mode: 'multiply' as const,
+			route: { priority: 10, weight: 1 },
+			current: { catalog_factor: 1.6, route_factor: 0.8, composite_factor: 1.28 },
+			windows: [{ catalog_factor: 1.6, route_factor: 0.8, composite_factor: 1.28 }],
+			provider_factor: null,
+		},
+	};
+
+	it('leaves catalog discounts unchanged when the user factor is missing', () => {
+		assert.equal(applyUserChargedFactorToDisplayDiscounts(catalog, null, 'min'), catalog);
+		assert.equal(applyUserChargedFactorToDisplayDiscounts(catalog, undefined, 'multiply'), catalog);
 	});
 
-	it('recognizes legacy discount tags', () => {
-		assert.equal(isDisplayDiscountTag('Discount:0.3'), true);
-		assert.equal(isDisplayDiscountTag('Discount.free:0.5'), true);
-		assert.equal(isDisplayDiscountTag('Hot'), false);
+	it('multiplies the route factor and keeps the official catalog factor', () => {
+		const out = applyUserChargedFactorToDisplayDiscounts(catalog, 0.5, 'multiply');
+		assert.equal(out.default?.current.catalog_factor, 1.6);
+		assert.equal(out.default?.current.route_factor, 0.4);
+		assert.equal(out.default?.current.composite_factor, 0.64);
+		assert.equal(out.default?.windows[0]?.composite_factor, 0.64);
+	});
+
+	it('takes the smaller charged factor in min mode', () => {
+		const cheaperUser = applyUserChargedFactorToDisplayDiscounts(catalog, 0.5, 'min');
+		assert.equal(cheaperUser.default?.current.catalog_factor, 1.6);
+		assert.equal(cheaperUser.default?.current.route_factor, 0.5);
+		assert.equal(cheaperUser.default?.current.composite_factor, 0.8);
+
+		const cheaperRoute = applyUserChargedFactorToDisplayDiscounts(catalog, 0.9, 'min');
+		assert.equal(cheaperRoute.default?.current.route_factor, 0.8);
+		assert.equal(cheaperRoute.default?.current.composite_factor, 1.28);
+	});
+});
+
+describe('provider_factor display', () => {
+	it('folds the active official factor into the displayed route factor', () => {
+		const discount = buildDisplayDiscountForRoute({
+			pricingProfileJson: null,
+			priceOverrideJson: JSON.stringify({
+				provider_factor: 0.5,
+				charged_factor: 1,
+				provider_factor_expires_at: '2026-11-01T00:00:00.000Z',
+			}),
+			timezone: 'UTC',
+			priority: 1,
+			weight: 1,
+			now: new Date('2026-10-15T00:00:00.000Z'),
+		});
+		assert.equal(discount.current.route_factor, 0.5);
+		assert.equal(discount.current.composite_factor, 0.5);
+		assert.equal(discount.provider_factor?.active, true);
+		assert.equal(discount.provider_factor?.expires_at, '2026-11-01T00:00:00.000Z');
+	});
+
+	it('shows full route price after the official factor expires', () => {
+		const discount = buildDisplayDiscountForRoute({
+			pricingProfileJson: null,
+			priceOverrideJson: JSON.stringify({
+				provider_factor: 0.5,
+				charged_factor: 1,
+				provider_factor_expires_at: '2026-11-01T00:00:00.000Z',
+			}),
+			timezone: 'UTC',
+			priority: 1,
+			weight: 1,
+			now: new Date('2026-11-01T00:00:00.000Z'),
+		});
+		assert.equal(discount.current.route_factor, 1);
+		assert.equal(discount.provider_factor?.active, false);
+		assert.equal(discount.provider_factor?.effective, 1);
+	});
+});
+
+describe('display discount with per-period provider validity', () => {
+	it('matches runtime factors when root is expired but one provider period is active', () => {
+		const priceOverrideJson = JSON.stringify({
+			charged_factor: 2,
+			provider_factor: 0.5,
+			provider_factor_expires_at: '2026-01-01T00:00:00Z',
+			schedule: {
+				mode: 'override',
+				charged: [{ start: '09:00', end: '18:00', factor: 1.5 }],
+				provider: [
+					{ start: '09:00', end: '12:00', factor: 0.2, validity: { starts_at: '2026-10-01T00:00:00Z' } },
+					{ start: '12:00', end: '18:00', factor: 0.3, validity: { starts_at: '2026-11-01T00:00:00Z' } },
+				],
+			},
+		});
+		for (const [time, expected, active] of [
+			['10:00', 0.3, true],
+			['14:00', 1.5, false],
+			['20:00', 2, false],
+		] as const) {
+			const group = buildDisplayDiscountForRoute({
+				priceOverrideJson,
+				pricingProfileJson: null,
+				timezone: 'UTC',
+				priority: 1,
+				weight: 1,
+				now: new Date(`2026-10-02T${time}:00Z`),
+			});
+			assert.equal(group.current.composite_factor, expected);
+			assert.equal(group.provider_factor?.active, active);
+			assert.equal(group.windows.find((w) => w.start === '09:00')?.composite_factor, 0.3);
+			assert.equal(group.windows.find((w) => w.start === '12:00')?.composite_factor, 1.5);
+		}
 	});
 });

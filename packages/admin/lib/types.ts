@@ -137,9 +137,16 @@ export const API_KEY_BUDGET_AUDIT_SOURCE_CHANNELS = [
 export interface GatewayProvider {
   id: string;
   name: string;
-  /** Admin API 根据内置预设动态推导；不写入 providers 表。 */
+  /** 导入模板英文名、`__custom__`，或空字符串（尚未分类）。 */
+  kind?: string;
+  /** 已保存类型的中英文展示名。自定义与未分类时省略。 */
+  kind_labels?: {
+    en: string;
+    zh: string;
+  };
+  /** 未设置 kind 时按预设 / Endpoint 推导；已设置 kind 时由模板决定。不单独写入 providers 表。 */
   vendor_key?: string;
-  /** Admin API 根据内置预设动态推导的产品级图标；不写入 providers 表。 */
+  /** 未设置 kind 时按预设推导；已设置 kind 时由模板决定。不单独写入 providers 表。 */
   icon_key?: string;
   /** Admin API 根据内置预设叠加的官网 / 密钥 / 邀请链接；不写入 providers 表。 */
   catalog_links?: {
@@ -160,6 +167,8 @@ export interface GatewayProvider {
   routes_count?: number;
   /** 其中 status=active 的数量 */
   active_routes_count?: number;
+  /** 当前 kind 是否有额度适配器。不落库。 */
+  quota_supported?: boolean;
 }
 
 export interface GatewayModel {
@@ -435,7 +444,12 @@ export interface ModelUsageRow extends AnalyticsRowCosts {
   content_ttft_rate: number;
   avg_upstream_response_ms: number | null;
   tokens_per_second: number | null;
+  stream_tokens_per_second?: number | null;
+  stream_sample_count?: number;
   failover_rate: number;
+  /** Requests with at least one failover; legacy failover_rate counts events per 100 requests. */
+  failover_request_count?: number;
+  failover_request_rate?: number;
   avg_attempts: number | null;
   avg_charged_per_request: number;
 }
@@ -463,7 +477,12 @@ export interface ProviderUsageRow extends AnalyticsRowCosts {
   content_ttft_rate: number;
   avg_upstream_response_ms: number | null;
   tokens_per_second: number | null;
+  stream_tokens_per_second?: number | null;
+  stream_sample_count?: number;
   failover_rate: number;
+  /** Requests with at least one failover; legacy failover_rate counts events per 100 requests. */
+  failover_request_count?: number;
+  failover_request_rate?: number;
   avg_attempts: number | null;
   avg_charged_per_request: number;
 }
@@ -481,6 +500,7 @@ export interface UserUsageRow extends AnalyticsRowCosts {
   wallet_granted?: number | null;
   wallet_spent?: number | null;
   budget_usage_rate: number | null;
+  success_count?: number;
   success_rate: number;
   error_count: number;
 }
@@ -496,6 +516,9 @@ export interface ProviderReliabilityRow extends AnalyticsRowCosts {
   avg_latency_ms: number | null;
   avg_upstream_response_ms: number | null;
   failover_rate: number;
+  /** Requests with at least one failover; legacy failover_rate counts events per 100 requests. */
+  failover_request_count?: number;
+  failover_request_rate?: number;
   avg_attempts: number | null;
 }
 
@@ -509,6 +532,9 @@ export interface ModelProviderRow extends AnalyticsRowCosts {
   avg_latency_ms: number | null;
   avg_upstream_response_ms: number | null;
   failover_rate: number;
+  /** Requests with at least one failover; legacy failover_rate counts events per 100 requests. */
+  failover_request_count?: number;
+  failover_request_rate?: number;
   avg_attempts: number | null;
 }
 

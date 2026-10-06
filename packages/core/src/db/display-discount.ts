@@ -1,6 +1,7 @@
 /**
  * 对外目录折扣：从模型官方时段 + 代表路由 `price_override` 派生前台展示用 factor。
- * 不参与计费；计费仍走 usage-tracker。用户级 `charged_cost_factors` 不进入本结构。
+ * 不参与计费；计费仍走 usage-tracker。
+ * `GET /catalog/models` 只返回本结构；`GET /v1/models` 与 `GET /admin/users/:id/display-discounts` 再按用户倍率叠一层（见 {@link applyUserChargedFactorToDisplayDiscounts}）。
  */
 import { parsePricingProfile } from './pricing-profile';
 import {
@@ -9,18 +10,24 @@ import {
 	isEveryIsoWeekday,
 	nextIsoWeekday,
 	normalizeScheduleFactor,
+	isProviderFactorActive,
 	parseHhMmToMinutes,
 	parseRouteBaseFactors,
 	parseRoutePricingSchedule,
 	resolveEffectiveRouteFactor,
+	resolveProviderFactorValidity,
+	resolveRouteEffectiveFactors,
+	mergeScheduleSidesToSharedWindows,
 	windowCoversLocal,
 	effectiveIsoWeekdays,
 	type DailyScheduleWindow,
 	type RoutePricingScheduleMode,
 } from './pricing-schedule';
-
-export const DISPLAY_DISCOUNT_TAG_PREFIX = 'Discount:' as const;
-export const DISPLAY_DISCOUNT_GROUP_TAG_PREFIX = 'Discount.' as const;
+import {
+	DEFAULT_USER_CHARGED_COST_FACTOR_MODE,
+	type UserChargedCostFactorMode,
+} from '../lib/user-charged-cost-factor-mode';
+import { resolveCombinedChargedFactor } from './user-charged-cost-factors';
 
 export type DisplayDiscountKind = 'flat' | 'schedule';
 
@@ -33,6 +40,15 @@ export type DisplayDiscountWindow = {
 	composite_factor: number;
 };
 
+export type DisplayDiscountProviderFactor = {
+	base: number;
+	/** 当刻官方倍率（含分时；不在有效期内为 1）。 */
+	effective: number;
+	active: boolean;
+	starts_at: string | null;
+	expires_at: string | null;
+};
+
 export type DisplayDiscountGroup = {
 	timezone: string;
 	kind: DisplayDiscountKind;
@@ -40,6 +56,11 @@ export type DisplayDiscountGroup = {
 	route: { priority: number; weight: number };
 	current: DisplayDiscountWindow;
 	windows: DisplayDiscountWindow[];
+	/**
+	 * 路由配置了官方倍率（基数不是 1、有有效期或有分时）时返回。
+	 * `route_factor` 已乘上当刻 `effective`。
+	 */
+	provider_factor: DisplayDiscountProviderFactor | null;
 };
 
 export type DisplayDiscountRouteInput = {
@@ -57,14 +78,6 @@ export function normalizeDisplayRouteGroup(routeGroup?: string | null): string {
 	return g && g.length > 0 ? g : 'default';
 }
 
-export function isDisplayDiscountTag(tag: string): boolean {
-	const lower = tag.trim().toLowerCase();
-	return (
-		lower.startsWith(DISPLAY_DISCOUNT_TAG_PREFIX.toLowerCase()) ||
-		lower.startsWith(DISPLAY_DISCOUNT_GROUP_TAG_PREFIX.toLowerCase())
-	);
-}
-
 export function formatDisplayDiscountLabel(composite: number): string {
 	if (!Number.isFinite(composite) || composite <= 0 || composite >= 1) {
 		return '';
@@ -72,14 +85,6 @@ export function formatDisplayDiscountLabel(composite: number): string {
 	const percent = (1 - composite) * 100;
 	const percentLabel = Number.isInteger(percent) ? percent.toString() : percent.toFixed(1).replace(/\.0$/, '');
 	return `-${percentLabel}%`;
-}
-
-export function formatDisplayDiscountFactor(n: number): string {
-	const x = normalizeScheduleFactor(n);
-	if (!Number.isFinite(x)) {
-		return '1';
-	}
-	return x.toFixed(10).replace(/0+$/, '').replace(/\.$/, '');
 }
 
 export type PickRepresentativeRouteContext = {
@@ -320,16 +325,16 @@ function hitWindowAt(
 	return null;
 }
 
-function resolveRouteFactorAt(
-	chargedWindows: DailyScheduleWindow[],
+function resolveSideFactorAt(
+	windows: DailyScheduleWindow[],
 	mode: RoutePricingScheduleMode,
-	baseCharged: number,
+	base: number,
 	minutes: number,
 	isoWeekday: number
 ): number {
-	const hit = hitWindowAt(chargedWindows, minutes, isoWeekday);
+	const hit = hitWindowAt(windows, minutes, isoWeekday);
 	return resolveEffectiveRouteFactor(
-		baseCharged,
+		base,
 		{
 			factor: hit?.factor ?? 1,
 			localTime: formatMinutesToHhMm(minutes),
@@ -340,6 +345,35 @@ function resolveRouteFactorAt(
 		},
 		mode
 	);
+}
+
+function resolveChargedRouteFactorAt(options: {
+	chargedWindows: DailyScheduleWindow[];
+	providerWindows: DailyScheduleWindow[];
+	mode: RoutePricingScheduleMode;
+	baseCharged: number;
+	baseProvider: number;
+	providerActive: boolean;
+	minutes: number;
+	isoWeekday: number;
+}): number {
+	const charged = resolveSideFactorAt(
+		options.chargedWindows,
+		options.mode,
+		options.baseCharged,
+		options.minutes,
+		options.isoWeekday
+	);
+	const provider = options.providerActive
+		? resolveSideFactorAt(
+				options.providerWindows,
+				options.mode,
+				options.baseProvider,
+				options.minutes,
+				options.isoWeekday
+			)
+		: 1;
+	return normalizeScheduleFactor(provider * charged);
 }
 
 function toDisplayWindow(
@@ -432,6 +466,13 @@ export function buildDisplayDiscountForRoute(options: {
 	const schedule = parseRoutePricingSchedule(options.priceOverrideJson);
 	const bases = parseRouteBaseFactors(options.priceOverrideJson);
 	const mode = schedule.mode;
+	const providerActive = isProviderFactorActive(bases, now);
+	const providerConfigured =
+		bases.providerFactor !== 1 ||
+		bases.providerStartsAt != null ||
+		bases.providerExpiresAt != null ||
+		bases.providerWindowInvalid ||
+		schedule.provider.length > 0;
 
 	let sourceWindows: DailyScheduleWindow[];
 	let catalogLookup: DailyScheduleWindow[];
@@ -441,26 +482,51 @@ export function buildDisplayDiscountForRoute(options: {
 	} else if (schedule.charged.length > 0) {
 		sourceWindows = fillDailyScheduleGaps(schedule.charged);
 		catalogLookup = [];
+	} else if (schedule.provider.length > 0) {
+		sourceWindows = fillDailyScheduleGaps(schedule.provider);
+		catalogLookup = [];
 	} else {
 		sourceWindows = [];
 		catalogLookup = [];
 	}
+	// Keep every pricing boundary, including independent provider periods within a catalog window.
+	if (schedule.provider.length > 0) {
+		sourceWindows = fillDailyScheduleGaps(mergeScheduleSidesToSharedWindows(catalogWindows, schedule.charged, {
+			mode: 'override', chargedBase: 1, meteredBase: mode === 'multiply' ? 1 : bases.chargedFactor,
+			provider: schedule.provider, providerBase: mode === 'multiply' ? 1 : bases.providerFactor,
+		}).map((w) => ({ start: w.start, end: w.end, days: w.days, factor: 1 })));
+	}
+
+	const routeFactorAt = (minutes: number, isoWeekday: number) =>
+		resolveChargedRouteFactorAt({
+			chargedWindows: schedule.charged,
+			providerWindows: schedule.provider,
+			mode,
+			baseCharged: bases.chargedFactor,
+			baseProvider: bases.providerFactor,
+			providerActive: isProviderFactorActive(resolveProviderFactorValidity(
+				bases, hitWindowAt(schedule.provider, minutes, isoWeekday),
+			), now),
+			minutes,
+			isoWeekday,
+		});
 
 	const priced: DisplayDiscountWindow[] =
 		sourceWindows.length === 0
-			? [toDisplayWindow({}, 1, bases.chargedFactor)]
+			? [
+					toDisplayWindow(
+						{},
+						1,
+						providerActive
+							? normalizeScheduleFactor(bases.providerFactor * bases.chargedFactor)
+							: bases.chargedFactor
+					),
+				]
 			: sourceWindows.map((w) => {
 					const mid = windowMidpoint(w);
 					const catalogHit = hitWindowAt(catalogLookup, mid.minutes, mid.isoWeekday);
 					const catalogFactor = catalogHit?.factor ?? 1;
-					const routeFactor = resolveRouteFactorAt(
-						schedule.charged,
-						mode,
-						bases.chargedFactor,
-						mid.minutes,
-						mid.isoWeekday
-					);
-					return toDisplayWindow(w, catalogFactor, routeFactor);
+					return toDisplayWindow(w, catalogFactor, routeFactorAt(mid.minutes, mid.isoWeekday));
 				});
 
 	const { kind, windows } = flattenIfUniform(priced);
@@ -468,10 +534,24 @@ export function buildDisplayDiscountForRoute(options: {
 	const liveWeekday = formatLocalIsoWeekday(now, options.timezone);
 	const liveCatalog =
 		liveMinutes == null ? 1 : (hitWindowAt(catalogLookup, liveMinutes, liveWeekday)?.factor ?? 1);
+	const liveProvider = resolveRouteEffectiveFactors({
+		priceOverrideJson: options.priceOverrideJson, nowUtc: now, timezone: options.timezone,
+	}).provider;
+	const providerFactor: DisplayDiscountProviderFactor | null = providerConfigured
+		? {
+				base: bases.providerFactor,
+				effective: liveProvider.effective,
+				active: liveProvider.active,
+				starts_at: liveProvider.startsAt,
+				expires_at: liveProvider.expiresAt,
+			}
+		: null;
 	const liveRoute =
 		liveMinutes == null
-			? bases.chargedFactor
-			: resolveRouteFactorAt(schedule.charged, mode, bases.chargedFactor, liveMinutes, liveWeekday);
+			? providerActive
+				? normalizeScheduleFactor(bases.providerFactor * bases.chargedFactor)
+				: bases.chargedFactor
+			: routeFactorAt(liveMinutes, liveWeekday);
 	const liveCurrent = toDisplayWindow(
 		resolveDisplayDiscountAt(windows, now, options.timezone) ?? {},
 		liveCatalog,
@@ -491,6 +571,7 @@ export function buildDisplayDiscountForRoute(options: {
 		route: { priority: options.priority, weight: options.weight },
 		current,
 		windows,
+		provider_factor: providerFactor,
 	};
 }
 
@@ -545,28 +626,73 @@ export function buildDisplayDiscountsByRouteGroup(options: {
 	return out;
 }
 
-function derivedTagForGroup(group: string, composite: number): string | null {
-	if (!Number.isFinite(composite) || composite <= 0 || composite >= 1) {
-		return null;
-	}
-	return `${DISPLAY_DISCOUNT_GROUP_TAG_PREFIX}${group}:${formatDisplayDiscountFactor(composite)}`;
+function applyUserChargedFactorToDisplayWindow(
+	window: DisplayDiscountWindow,
+	userFactor: number,
+	mode: UserChargedCostFactorMode
+): DisplayDiscountWindow {
+	const combined = resolveCombinedChargedFactor(window.route_factor, userFactor, mode);
+	const routeFactor = combined ?? window.route_factor;
+	return toDisplayWindow(window, window.catalog_factor, routeFactor);
+}
+
+function applyUserChargedFactorToDisplayDiscountGroup(
+	group: DisplayDiscountGroup,
+	userFactor: number,
+	mode: UserChargedCostFactorMode
+): DisplayDiscountGroup {
+	const mappedWindows = group.windows.map((window) =>
+		applyUserChargedFactorToDisplayWindow(window, userFactor, mode)
+	);
+	const { kind, windows } = flattenIfUniform(mappedWindows);
+	const mappedCurrent = applyUserChargedFactorToDisplayWindow(group.current, userFactor, mode);
+	return {
+		...group,
+		kind,
+		current: kind === 'flat' ? windows[0]! : mappedCurrent,
+		windows,
+	};
 }
 
 /**
- * 去掉手填 `Discount:*` / `Discount.*`，再按当刻 composite 注入 `Discount.<group>:<factor>`。
+ * 把用户 Charged 倍率叠进已算好的目录折扣（只改 `route_factor` / `composite_factor`）。
+ * 未配置用户倍率时原样返回。`catalog_factor` 不变。
  */
-export function mergeDerivedDiscountTags(
-	tags: readonly string[],
-	discounts: Record<string, DisplayDiscountGroup>
-): string[] {
-	const kept = tags.filter((tag) => typeof tag === 'string' && tag.trim() !== '' && !isDisplayDiscountTag(tag));
-	const derived: string[] = [];
-	const groups = Object.keys(discounts).sort((a, b) => a.localeCompare(b));
-	for (const group of groups) {
-		const tag = derivedTagForGroup(group, discounts[group]!.current.composite_factor);
-		if (tag) {
-			derived.push(tag);
-		}
+export function applyUserChargedFactorToDisplayDiscounts(
+	discounts: Record<string, DisplayDiscountGroup>,
+	userFactor: number | null | undefined,
+	mode: UserChargedCostFactorMode = DEFAULT_USER_CHARGED_COST_FACTOR_MODE
+): Record<string, DisplayDiscountGroup> {
+	if (userFactor == null) {
+		return discounts;
 	}
-	return [...kept, ...derived];
+	const out: Record<string, DisplayDiscountGroup> = {};
+	for (const [group, value] of Object.entries(discounts)) {
+		out[group] = applyUserChargedFactorToDisplayDiscountGroup(value, userFactor, mode);
+	}
+	return out;
+}
+
+/** 官方时段 × 代表路由 Charged，再按用户倍率叠一层。 */
+export function buildModelDisplayDiscounts(options: {
+	pricingProfileJson: string | null | undefined;
+	routes: readonly DisplayDiscountRouteInput[];
+	timezone: string;
+	now?: Date;
+	allowedRouteGroups?: readonly string[] | null;
+	userChargedFactor?: number | null;
+	userChargedFactorMode?: UserChargedCostFactorMode;
+}): Record<string, DisplayDiscountGroup> {
+	const discounts = buildDisplayDiscountsByRouteGroup({
+		routes: options.routes,
+		pricingProfileJson: options.pricingProfileJson,
+		timezone: options.timezone,
+		now: options.now,
+		allowedRouteGroups: options.allowedRouteGroups,
+	});
+	return applyUserChargedFactorToDisplayDiscounts(
+		discounts,
+		options.userChargedFactor ?? null,
+		options.userChargedFactorMode
+	);
 }
