@@ -16,6 +16,12 @@ import type { MySqlDatabaseClient } from '../../storage/database-client';
 import type { RequestLogsRepository } from '../../storage/gateway-repository-interfaces';
 import { asMySqlPool } from './mysql2-compat';
 import { filterAllowedRequestLogStatuses } from '../request-log-status-filter';
+import { appendModelIdPrefixCondition, appendProviderIdsCondition } from '../request-log-filters';
+import {
+	businessTimezoneOffsetSeconds,
+	mysqlTimeseriesBucketExpr,
+	timeseriesOffsetAnchor,
+} from '../request-timeseries-bucket';
 
 export function createMySqlRequestLogsRepository(db: MySqlDatabaseClient): RequestLogsRepository {
 	const pool = asMySqlPool(db.raw);
@@ -83,11 +89,14 @@ export function createMySqlRequestLogsRepository(db: MySqlDatabaseClient): Reque
 		async getRequestLogs(options: {
 			page?: number;
 			pageSize?: number;
+			id?: string;
 			apiKeyId?: string;
 			userId?: string;
 			userEmail?: string;
 			modelId?: string;
 			providerId?: string;
+			providerIds?: string[];
+			modelIdPrefix?: string;
 			routeGroup?: string;
 			protocol?: string;
 			status?: string;
@@ -100,6 +109,10 @@ export function createMySqlRequestLogsRepository(db: MySqlDatabaseClient): Reque
 			const conditions: string[] = [];
 			const bindValues: unknown[] = [];
 
+			if (options.id) {
+				conditions.push('rl.id = ?');
+				bindValues.push(options.id);
+			}
 			if (options.apiKeyId) {
 				conditions.push('rl.api_key_id = ?');
 				bindValues.push(options.apiKeyId);
@@ -120,6 +133,8 @@ export function createMySqlRequestLogsRepository(db: MySqlDatabaseClient): Reque
 				conditions.push('rl.provider_id = ?');
 				bindValues.push(options.providerId);
 			}
+			appendProviderIdsCondition(conditions, bindValues, 'rl.provider_id', options.providerIds);
+			appendModelIdPrefixCondition(conditions, bindValues, 'rl.model_id', options.modelIdPrefix);
 			if (options.routeGroup) {
 				conditions.push('rl.route_group = ?');
 				bindValues.push(options.routeGroup);
@@ -182,11 +197,10 @@ export function createMySqlRequestLogsRepository(db: MySqlDatabaseClient): Reque
 			startDate: string;
 			endDate: string;
 			granularity: 'hour' | 'day';
+			timeZone: string;
 		}) {
-			const bucketExpr =
-				options.granularity === 'hour'
-					? "DATE_FORMAT(created_at, '%Y-%m-%d %H:00:00')"
-					: "DATE_FORMAT(created_at, '%Y-%m-%d')";
+			const bucketExpr = mysqlTimeseriesBucketExpr(options.granularity);
+			const offsetSeconds = businessTimezoneOffsetSeconds(options.timeZone, timeseriesOffsetAnchor(options.endDate));
 			const [rows] = await pool.query<(RowDataPacket & Record<string, unknown>)[]>(
 				`SELECT
 					${bucketExpr} AS bucket,
@@ -196,7 +210,7 @@ export function createMySqlRequestLogsRepository(db: MySqlDatabaseClient): Reque
 				 WHERE created_at >= ? AND created_at <= ?
 				 GROUP BY bucket
 				 ORDER BY bucket ASC`,
-				[options.startDate, options.endDate]
+				[offsetSeconds, options.startDate, options.endDate]
 			);
 			return mapRequestTimeseriesRows(rows as Parameters<typeof mapRequestTimeseriesRows>[0]);
 		},

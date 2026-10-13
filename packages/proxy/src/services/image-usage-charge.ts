@@ -61,6 +61,8 @@ export type ImageBillingParams = {
 	catalogModelId?: string;
 	/** `users.charged_cost_factors` JSON */
 	userChargedCostFactorsJson?: string | null;
+	/** 本次请求的 route group；缺省按 `default` 查找用户倍率 */
+	routeGroup?: string | null;
 	/** 全局合成模式；入口函数会从 system_config 填入 */
 	userChargedCostFactorMode?: UserChargedCostFactorMode;
 };
@@ -94,7 +96,7 @@ function withUserImageChargedFactor(
 		breakdown,
 		params.userChargedCostFactorsJson,
 		params.catalogModelId ?? '',
-		{ mode: params.userChargedCostFactorMode }
+		{ mode: params.userChargedCostFactorMode, routeGroup: params.routeGroup }
 	);
 }
 
@@ -277,6 +279,7 @@ function estimateImageTokenCosts(
 			cached_text: usage.cached_text_tokens,
 			image_input: usage.image_input_tokens,
 			cached_image_input: usage.cached_image_input_tokens,
+			text_output: usage.text_output_tokens,
 			image_output: usage.image_output_tokens,
 			total: usage.total_tokens,
 		},
@@ -313,7 +316,7 @@ function estimateImageTokenCosts(
 		pricingAuditJson,
 		logTokens: {
 			inputTokens: usage.text_tokens,
-			outputTokens: usage.image_output_tokens,
+			outputTokens: usage.image_output_tokens + usage.text_output_tokens,
 			cacheReadTokens: usage.cached_text_tokens,
 			cacheWriteTokens: 0,
 			totalTokens: usage.total_tokens,
@@ -453,16 +456,21 @@ export async function estimateImageCosts(
 export async function estimateImageBudgetPrecheck(
 	repos: GatewayRepositories,
 	params: Omit<ImageBillingParams, 'routePriceOverrideJson'>,
-	routePriceOverrideJsons: Array<string | null | undefined>
+	routePriceOverrideJsons: Array<string | null | undefined>,
+	options?: { usage?: ImageTokenUsage | null }
 ): Promise<ImageCostBreakdown> {
 	const overrides =
 		routePriceOverrideJsons.length > 0 ? routePriceOverrideJsons : [null];
 	let best: ImageCostBreakdown | null = null;
 	for (const override of overrides) {
-		const costs = await estimateImageCosts(repos, {
-			...params,
-			routePriceOverrideJson: override ?? null,
-		});
+		const costs = await estimateImageCosts(
+			repos,
+			{
+				...params,
+				routePriceOverrideJson: override ?? null,
+			},
+			options?.usage ? { usage: options.usage } : undefined
+		);
 		if (!best || costs.chargedCost > best.chargedCost) {
 			best = costs;
 		}
@@ -534,7 +542,7 @@ export type RecordImageUsageParams = {
 	providerName?: string | null;
 	requestBody?: string | null;
 	upstreamRequestBody?: string | null;
-	requestProtocol: 'openai';
+	requestProtocol: UpstreamProtocol;
 	requestOperation?: string | null;
 	upstreamProtocol: UpstreamProtocol;
 	upstreamOperation?: string | null;

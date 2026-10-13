@@ -4,13 +4,22 @@
  */
 import type { ImageOperation } from '@/lib/image-generations';
 import type { ProviderEndpointCapability } from '@octafuse/core/provider-endpoints';
-import { DASHSCOPE_MULTIMODAL_GENERATION_PATH } from '@octafuse/core/route-topology';
+import {
+	DASHSCOPE_MULTIMODAL_GENERATION_PATH,
+	MINIMAX_IMAGE_GENERATION_PATH,
+	VOLCENGINE_IMAGE_GENERATIONS_PATH,
+	MINIMAX_SPEECH_TO_TEXT_PATH,
+	MINIMAX_T2A_PATH,
+} from '@octafuse/core/route-topology';
 import type { UpstreamProtocol } from '@octafuse/core/upstream-protocol';
 import { GATEWAY_TOOLS, findGatewayToolById, type GatewayToolDefinition } from '@/lib/gateway-tools';
 
-/** 全量 invoke kind（含 Agent Tools） */
+/** 全量 invoke kind（含 Agent Tools）。MCP 聚合调用只出现在请求日志，不进入模拟器。 */
 export const INVOKE_KINDS = ['llm', 'image', 'audio', 'tool'] as const;
 export type InvokeKind = (typeof INVOKE_KINDS)[number];
+
+/** 请求日志里 MCP 聚合调用的 `provider_id`。不加入 `INVOKE_KINDS`，避免模拟器把它当成可执行入口。 */
+export const MCP_REQUEST_LOG_PROVIDER_ID = 'octafuse-mcp';
 
 /** Models / Routes 目录筛选（无 tool） */
 export const MODEL_KIND_FILTERS = ['llm', 'image', 'audio'] as const;
@@ -19,7 +28,7 @@ export type ModelKindFilter = (typeof MODEL_KIND_FILTERS)[number];
 export const DEFAULT_KIND_FILTER: ModelKindFilter = 'llm';
 export const DEFAULT_INVOKE_KIND: InvokeKind = 'llm';
 
-export type SimulatorProtocol = 'openai' | 'anthropic' | 'gemini' | 'dashscope';
+export type SimulatorProtocol = 'openai' | 'anthropic' | 'gemini' | 'dashscope' | 'minimax' | 'volcengine';
 export type GeminiContentAction = 'generateContent' | 'streamGenerateContent';
 export type AudioOperation = 'transcriptions' | 'speech';
 /** OpenAI LLM 公开入口：Chat Completions 或 Responses。 */
@@ -96,6 +105,8 @@ export function resolveRequestOperation(input: {
 			}
 			return input.audioOperation === 'speech' ? 'audio.speech' : 'audio.transcriptions';
 		case 'image':
+			if (input.protocol === 'dashscope') return 'images.generations.multimodal';
+			if (input.protocol === 'gemini') return 'models.generate';
 			return `images.${input.imageOperation === 'edits' ? 'edits' : 'generations'}`;
 		case 'llm':
 			if (input.protocol === 'openai') return input.llmOperation === 'responses' ? 'responses' : 'chat';
@@ -160,9 +171,21 @@ export function resolveProxyPathForModelInvoke(input: {
 		if (protocol === 'dashscope' && input.audioOperation !== 'speech') {
 			return DASHSCOPE_MULTIMODAL_GENERATION_PATH;
 		}
+		if (protocol === 'minimax' && input.audioOperation === 'speech') {
+			return MINIMAX_T2A_PATH;
+		}
+		if (protocol === 'minimax') {
+			return MINIMAX_SPEECH_TO_TEXT_PATH;
+		}
 		return input.audioOperation === 'speech' ? '/v1/audio/speech' : '/v1/audio/transcriptions';
 	}
 	if (input.kind === 'image') {
+		if (protocol === 'gemini') {
+			const model = encodeURIComponent(input.geminiModelSegment || 'model');
+			return `/v1beta/models/${model}:generateContent`;
+		}
+		if (protocol === 'minimax') return MINIMAX_IMAGE_GENERATION_PATH;
+		if (protocol === 'volcengine') return VOLCENGINE_IMAGE_GENERATIONS_PATH;
 		return input.imageOperation === 'edits' ? '/v1/images/edits' : '/v1/images/generations';
 	}
 	// llm

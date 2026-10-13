@@ -5,6 +5,8 @@ import { createPortal } from 'react-dom';
 import { BanknotesIcon } from '@heroicons/react/24/outline';
 import { useLocale, useTranslations } from 'next-intl';
 import type { ProviderQuotaSnapshot, ProviderQuotaState } from '@octafuse/core/provider-quota';
+import { formatGatewayMoneyCompact } from '@/lib/format-gateway-currency';
+import { useGatewayDateTime } from '@/lib/use-gateway-datetime';
 import { fetchProviderQuota } from '../provider-api';
 
 type ProviderQuotaButtonProps = {
@@ -33,26 +35,13 @@ const STATE_BAR: Record<ProviderQuotaState, string> = {
 	unknown: 'bg-slate-400',
 };
 
-function formatTime(value: string, locale: string): string {
-	const date = new Date(value);
-	if (Number.isNaN(date.getTime())) return value;
-	return date.toLocaleString(locale);
-}
-
 function formatQuantity(value: number, locale: string): string {
 	return new Intl.NumberFormat(locale, { maximumFractionDigits: 4 }).format(value);
 }
 
 function formatMoney(value: number, currency: string, locale: string): string {
-	try {
-		return new Intl.NumberFormat(locale, {
-			style: 'currency',
-			currency,
-			maximumFractionDigits: 4,
-		}).format(value);
-	} catch {
-		return `${formatQuantity(value, locale)} ${currency}`;
-	}
+	if (/^[A-Z]{3}$/.test(currency)) return formatGatewayMoneyCompact(value, currency, 4);
+	return `${formatQuantity(value, locale)} ${currency}`;
 }
 
 function windowCurrency(adapter: string): string | null {
@@ -187,6 +176,7 @@ function QuotaSnapshotBody({
 	locale: string;
 }) {
 	const t = useTranslations('providers.quota');
+	const { formatDateTime } = useGatewayDateTime();
 	const currencyUnit = windowCurrency(snapshot.adapter);
 	return (
 		<div className="space-y-3">
@@ -197,7 +187,7 @@ function QuotaSnapshotBody({
 					{t(`state.${snapshot.state}`)}
 				</span>
 				<span className="text-[11px] text-slate-500">
-					{t('checkedAt', { time: formatTime(snapshot.checkedAt, locale) })}
+					{t('checkedAt', { time: formatDateTime(snapshot.checkedAt) })}
 				</span>
 			</div>
 			{snapshot.balances.length > 0 ? (
@@ -271,7 +261,7 @@ function QuotaSnapshotBody({
 									) : null}
 									{quotaWindow.resetsAt ? (
 										<p className="mt-0.5 text-[11px] text-slate-500">
-											{t('resetsAt', { time: formatTime(quotaWindow.resetsAt, locale) })}
+											{t('resetsAt', { time: formatDateTime(quotaWindow.resetsAt) })}
 										</p>
 									) : null}
 								</li>

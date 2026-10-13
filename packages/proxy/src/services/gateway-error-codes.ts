@@ -11,6 +11,9 @@
 
 export const GATEWAY_ERROR_CODE_HEADER = 'X-OctaFuse-Error-Code';
 
+/** 与 `api_key_request_logs.id` 相同。成功和失败都会返回，用来对上请求日志。 */
+export const GATEWAY_REQUEST_ID_HEADER = 'X-OctaFuse-Request-Id';
+
 export const GatewayErrorCode = {
 	// gateway.*
 	invalidJson: 'gateway.invalid_json',
@@ -22,6 +25,8 @@ export const GatewayErrorCode = {
 	noRoute: 'gateway.no_route',
 	routeResolutionFailed: 'gateway.route_resolution_failed',
 	invalidRequest: 'gateway.invalid_request',
+	mcpItemDisabled: 'gateway.mcp_item_disabled',
+	mcpPricingInvalid: 'gateway.mcp_pricing_invalid',
 	upstreamRequestFailed: 'gateway.upstream_request_failed',
 	responsesStateRouteUnavailable: 'responses.state_route_unavailable',
 	responsesUnsupportedStateOperation: 'responses.unsupported_state_operation',

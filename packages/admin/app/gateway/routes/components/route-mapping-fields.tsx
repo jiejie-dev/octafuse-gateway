@@ -2,6 +2,7 @@
 
 import { ArrowRightIcon, ComputerDesktopIcon, ServerIcon } from '@heroicons/react/24/outline';
 import { editorInputClass, editorLabelClass, RouteEditorSection } from './route-editor-ui';
+import { RouteAdapterGuide } from './route-adapter-guide';
 import { useTranslations, useLocale } from 'next-intl';
 import { liveProviderPickerLabel, sortProvidersByKindThenName } from '@/lib/provider-kind';
 import { UPSTREAM_PROTOCOLS, type UpstreamProtocol } from '@/lib/upstream-protocol';
@@ -12,6 +13,7 @@ import {
 	catalogScheduleWindowsFromModel,
 	compatibleAdaptersForRoute,
 	listAdapterOptionsForModel,
+	modelKindForModel,
 	requestOperationsForModel,
 	resolveAdapterOptionKey,
 	upstreamOperationsForProviderModel,
@@ -31,7 +33,9 @@ type Props = Pick<
 	| 'selectedModelIsAudio'
 	| 'allowedProtocolsForProvider'
 	| 'onFormChange'
->;
+> & {
+	onOpenRequestTab: () => void;
+};
 
 export function RouteMappingFields({
 	editingRoute,
@@ -45,14 +49,16 @@ export function RouteMappingFields({
 	selectedModelIsAudio,
 	allowedProtocolsForProvider,
 	onFormChange,
+	onOpenRequestTab,
 }: Props) {
 	const t = useTranslations('routes.modal');
+	const tFlow = useTranslations('routes.flow');
 	const tKind = useTranslations('providers.kind');
 	const locale = useLocale();
 	const adapterLabel = (adapter: string) =>
 		t.has(`adapterNames.${adapter}`) ? t(`adapterNames.${adapter}`) : adapter;
-	// Image models keep the public request protocol as OpenAI; upstream may be openai or dashscope.
-	const lockOpenaiProtocol = selectedModelIsImage;
+	const adapterPurpose = (adapter: string) =>
+		t.has(`adapterGuides.${adapter}.purpose`) ? t(`adapterGuides.${adapter}.purpose`) : null;
 	const requestProtocols = UPSTREAM_PROTOCOLS.filter(
 		(protocol) => requestOperationsForModel(selectedModel, protocol, formData.provider_model_name).length > 0
 	);
@@ -67,19 +73,27 @@ export function RouteMappingFields({
 		formData.upstream_protocol,
 		formData.provider_model_name
 	);
-	const adapterOptions = listAdapterOptionsForModel(
+	const { options: adapterOptions, modelUnrecognized } = listAdapterOptionsForModel(
 		selectedModel,
 		selectedProvider,
 		formData.provider_model_name
 	);
-	const selectedAdapterOptionKey = resolveAdapterOptionKey(formData);
+	const selectedAdapterOptionKey = resolveAdapterOptionKey(formData, modelKindForModel(selectedModel));
 	const selectedAdapterOption = adapterOptions.find(
 		(option) => option.descriptor.optionKey === selectedAdapterOptionKey
 	);
+	const providerModelNamed = formData.provider_model_name.trim().length > 0;
 	const visibleAdapterOptions = selectedProvider
-		? adapterOptions.filter(
-				(option) => option.available || option.descriptor.optionKey === selectedAdapterOptionKey
-		  )
+		? adapterOptions.filter((option) => {
+				const kept =
+					option.available || option.descriptor.optionKey === selectedAdapterOptionKey;
+				if (!kept) return false;
+				if (!providerModelNamed || modelUnrecognized) return true;
+				return (
+					option.modelMatch !== 'mismatch' ||
+					option.descriptor.optionKey === selectedAdapterOptionKey
+				);
+		  })
 		: [];
 	const compatibleAdapters = compatibleAdaptersForRoute(formData);
 	const showCurrentAdapter =
@@ -89,9 +103,13 @@ export function RouteMappingFields({
 		Boolean(formData.adapter);
 	const lockTopology = Boolean(selectedAdapterOption) && !showCurrentAdapter;
 	const selectableProviders = sortProvidersByKindThenName(
-		providers.filter(
-			(provider) =>
-				(Boolean(editingRoute || duplicateSourceRouteId) && provider.id === formData.provider_id) ||
+		providers.filter((provider) => {
+			const isCurrentBinding =
+				Boolean(editingRoute || duplicateSourceRouteId) && provider.id === formData.provider_id;
+			// 停用供应商接不到流量。新建时不列出；编辑或复制时只保留当前绑定，避免 select 对不上值。
+			if (provider.status === 'disabled' && !isCurrentBinding) return false;
+			return (
+				isCurrentBinding ||
 				UPSTREAM_PROTOCOLS.some(
 					(protocol) =>
 						upstreamOperationsForProviderModel(
@@ -101,7 +119,8 @@ export function RouteMappingFields({
 							formData.provider_model_name
 						).length > 0
 				)
-		),
+			);
+		}),
 		locale,
 		tKind('custom')
 	);
@@ -232,7 +251,7 @@ export function RouteMappingFields({
 												request_operation: requestOperation,
 											});
 										}}
-										disabled={lockOpenaiProtocol || lockTopology}
+										disabled={lockTopology}
 										className={editorInputClass}
 									>
 										{requestProtocols.map((p) => (
@@ -331,6 +350,7 @@ export function RouteMappingFields({
 								{selectableProviders.map((p) => (
 									<option key={p.id} value={p.id}>
 										{liveProviderPickerLabel(p, locale, tKind('custom'), p.id)}
+										{p.status === 'disabled' ? ` · ${tFlow('providerDisabled')}` : ''}
 									</option>
 								))}
 							</select>
@@ -456,14 +476,14 @@ export function RouteMappingFields({
 				</div>
 			</RouteEditorSection>
 			<RouteEditorSection title={t('editor.routingTitle')}>
-				<div className="grid items-start gap-4 md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,0.55fr)_minmax(0,0.55fr)]">
+				<div className="grid items-start gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,120px)_minmax(0,95px)_minmax(0,95px)]">
 					<div>
 						<label htmlFor="route-field-adapter" className={editorLabelClass}>
 							{t('adapter')}
 						</label>
 						<select
 							id="route-field-adapter"
-							value={selectedAdapterOptionKey ?? formData.adapter}
+							value={selectedAdapterOptionKey ?? ''}
 							onChange={(e) => onFormChange(applyAdapterOptionToForm(formData, e.target.value))}
 							title={formData.adapter}
 							disabled={!selectedProvider}
@@ -473,6 +493,8 @@ export function RouteMappingFields({
 								<option value={formData.adapter}>{t('protocolHintSelectProvider')}</option>
 							) : visibleAdapterOptions.length === 0 ? (
 								<option value={formData.adapter}>{t('noCompatibleAdapter')}</option>
+							) : selectedAdapterOptionKey == null ? (
+								<option value="">{t('noCompatibleAdapter')}</option>
 							) : null}
 							{visibleAdapterOptions.map((option) => (
 								<option
@@ -493,21 +515,20 @@ export function RouteMappingFields({
 							) : null}
 						</select>
 						<p className="mt-2 text-xs text-gray-500">
-							{selectedProvider ? t('editor.adapterHint') : t('protocolHintSelectProvider')}
+							{!selectedProvider
+								? t('protocolHintSelectProvider')
+								: (adapterPurpose(selectedAdapterOption?.descriptor.id ?? formData.adapter) ??
+									t('editor.adapterHint'))}
 						</p>
+						{selectedProvider && modelUnrecognized ? (
+							<p className="mt-2 text-xs text-amber-700">{t('adapterModelUnrecognized')}</p>
+						) : null}
 						{selectedProvider &&
 						selectedAdapterOption &&
 						selectedAdapterOption.missingCapabilities.length > 0 ? (
 							<p className="mt-2 text-xs text-amber-700">
 								{t('adapterMissingCapabilities', {
 									capabilities: selectedAdapterOption.missingCapabilities.join(', '),
-								})}
-							</p>
-						) : null}
-						{selectedProvider && selectedAdapterOption?.descriptor.lossyFeatures?.length ? (
-							<p className="mt-2 text-xs text-amber-700">
-								{t('adapterLossyFeatures', {
-									features: selectedAdapterOption.descriptor.lossyFeatures.join(', '),
 								})}
 							</p>
 						) : null}
@@ -566,6 +587,15 @@ export function RouteMappingFields({
 						</div>
 					</div>
 				</div>
+				{selectedProvider && selectedAdapterOption ? (
+					<RouteAdapterGuide
+						key={selectedAdapterOption.descriptor.optionKey}
+						descriptor={selectedAdapterOption.descriptor}
+						modelId={formData.model_id}
+						routeGroup={formData.route_group}
+						onOpenRequestTab={onOpenRequestTab}
+					/>
+				) : null}
 			</RouteEditorSection>
 		</div>
 	);

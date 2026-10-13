@@ -17,6 +17,12 @@ import type { RequestLogsRepository } from '../../storage/gateway-repository-int
 import type { RequestLogsD1Statements } from './d1-repository-extras';
 import type { InsertRequestLogParams } from '../request-logs-types';
 import { filterAllowedRequestLogStatuses } from '../request-log-status-filter';
+import { appendModelIdPrefixCondition, appendProviderIdsCondition } from '../request-log-filters';
+import {
+	sqliteBusinessTimezoneModifier,
+	sqliteTimeseriesBucketExpr,
+	timeseriesOffsetAnchor,
+} from '../request-timeseries-bucket';
 
 export function buildInsertRequestLogStatement(db: D1Database, params: InsertRequestLogParams): D1PreparedStatement {
 	return db
@@ -142,11 +148,14 @@ export function createD1RequestLogsRepository(db: D1DatabaseClient): RequestLogs
 		async getRequestLogs(options: {
 			page?: number;
 			pageSize?: number;
+			id?: string;
 			apiKeyId?: string;
 			userId?: string;
 			userEmail?: string;
 			modelId?: string;
 			providerId?: string;
+			providerIds?: string[];
+			modelIdPrefix?: string;
 			routeGroup?: string;
 			protocol?: string;
 			status?: string;
@@ -160,6 +169,11 @@ export function createD1RequestLogsRepository(db: D1DatabaseClient): RequestLogs
 			const conditionsRl: string[] = [];
 			const bindValues: unknown[] = [];
 
+			if (options.id) {
+				conditions.push('id = ?');
+				conditionsRl.push('rl.id = ?');
+				bindValues.push(options.id);
+			}
 			if (options.apiKeyId) {
 				conditions.push('api_key_id = ?');
 				conditionsRl.push('rl.api_key_id = ?');
@@ -184,6 +198,22 @@ export function createD1RequestLogsRepository(db: D1DatabaseClient): RequestLogs
 				conditions.push('provider_id = ?');
 				conditionsRl.push('rl.provider_id = ?');
 				bindValues.push(options.providerId);
+			}
+			const providerIdConditions: string[] = [];
+			const providerIdBinds: unknown[] = [];
+			appendProviderIdsCondition(providerIdConditions, providerIdBinds, 'provider_id', options.providerIds);
+			if (providerIdConditions[0]) {
+				conditions.push(providerIdConditions[0]);
+				conditionsRl.push(providerIdConditions[0].replace('provider_id', 'rl.provider_id'));
+				bindValues.push(...providerIdBinds);
+			}
+			const modelPrefixConditions: string[] = [];
+			const modelPrefixBinds: unknown[] = [];
+			appendModelIdPrefixCondition(modelPrefixConditions, modelPrefixBinds, 'model_id', options.modelIdPrefix);
+			if (modelPrefixConditions[0]) {
+				conditions.push(modelPrefixConditions[0]);
+				conditionsRl.push(modelPrefixConditions[0].replace('model_id', 'rl.model_id'));
+				bindValues.push(...modelPrefixBinds);
 			}
 			if (options.routeGroup) {
 				conditions.push('route_group = ?');
@@ -258,11 +288,10 @@ export function createD1RequestLogsRepository(db: D1DatabaseClient): RequestLogs
 			startDate: string;
 			endDate: string;
 			granularity: 'hour' | 'day';
+			timeZone: string;
 		}) {
-			const bucketExpr =
-				options.granularity === 'hour'
-					? "strftime('%Y-%m-%d %H:00:00', created_at)"
-					: "strftime('%Y-%m-%d', created_at)";
+			const bucketExpr = sqliteTimeseriesBucketExpr(options.granularity);
+			const shift = sqliteBusinessTimezoneModifier(options.timeZone, timeseriesOffsetAnchor(options.endDate));
 			const rows = await raw
 				.prepare(
 					`SELECT
@@ -274,7 +303,7 @@ export function createD1RequestLogsRepository(db: D1DatabaseClient): RequestLogs
 			 GROUP BY bucket
 			 ORDER BY bucket ASC`
 				)
-				.bind(options.startDate, options.endDate)
+				.bind(shift, options.startDate, options.endDate)
 				.all();
 			return mapRequestTimeseriesRows(rows.results ?? []);
 		},
