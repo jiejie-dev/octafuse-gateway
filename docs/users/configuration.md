@@ -12,6 +12,8 @@
 | Admin API Key | 后台创建的具名、可授权 Bearer，用于外部系统调用 `/api/admin/*`。建议每个集成独立且最小权限。 |
 | 用户 API Key | 发给客户端调用代理服务（Proxy）的 Key，不应与 Admin API Key 混用。 |
 
+已有 OAuth2 认证服务器时，也可以使用 JWT access token 调用 Proxy，配置方法见 [外部 OAuth2 JWT 接入](./oauth2-jwt.md)。
+
 ## 2. 配置供应商
 
 供应商（Provider）表示一个上游模型入口。**一个供应商 = 一把上游 API Key + 启用状态**（`active` / `disabled`）。

@@ -22,6 +22,7 @@ export const GatewayErrorCode = {
 	budgetExceeded: 'gateway.budget_exceeded',
 	rateLimited: 'gateway.rate_limited',
 	authFailed: 'gateway.auth_failed',
+	authUnavailable: 'gateway.auth_unavailable',
 	noRoute: 'gateway.no_route',
 	routeResolutionFailed: 'gateway.route_resolution_failed',
 	invalidRequest: 'gateway.invalid_request',

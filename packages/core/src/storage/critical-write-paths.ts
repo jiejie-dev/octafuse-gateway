@@ -1,10 +1,12 @@
 import type { D1Database } from '@cloudflare/workers-types';
+import type { CreateUserWithKeyParams } from '../db/user-with-key-types';
 import type { InsertUserBudgetAuditLogParams } from '../db/user-budget-audit-params';
 import type { InsertKeyParams } from '../db/api-keys-types';
 import type { InsertRequestLogParams } from '../db/request-logs-types';
 import type { GrantWalletCreditParams, GrantWalletCreditResult } from '../db/wallet-credit';
 import {
 	createApiKeyWithAuditD1,
+	createUserWithKeyD1,
 	getSystemConfigValueD1,
 	getUserBudgetSnapshotD1,
 	grantWalletCreditWithAuditTxD1,
@@ -14,6 +16,7 @@ import {
 } from '../db/d1/critical-writes.impl';
 import {
 	createApiKeyWithAuditMy,
+	createUserWithKeyMy,
 	getSystemConfigValueMy,
 	getUserBudgetSnapshotMy,
 	grantWalletCreditWithAuditTxMy,
@@ -23,6 +26,7 @@ import {
 } from '../db/mysql/critical-writes.impl';
 import {
 	createApiKeyWithAuditPg,
+	createUserWithKeyPg,
 	getSystemConfigValuePg,
 	getUserBudgetSnapshotPg,
 	grantWalletCreditWithAuditTxPg,
@@ -79,6 +83,17 @@ export async function getSystemConfigValue(storage: StorageRef, key: string): Pr
 		return getSystemConfigValueMy(client, key);
 	}
 	return getSystemConfigValuePg(client, key);
+}
+
+/** Insert a user, its billing key and audit records in one transaction. */
+export async function createUserWithKey(storage: StorageRef, params: CreateUserWithKeyParams): Promise<void> {
+	if (params.key.userId !== params.user.id || params.audits.some((audit) => audit.userId !== params.user.id)) {
+		throw new Error('Provisioning identity mismatch');
+	}
+	const client = resolveDatabaseClient(storage);
+	if (client.driver === 'd1') return createUserWithKeyD1(client, params);
+	if (client.driver === 'mysql') return createUserWithKeyMy(client, params);
+	return createUserWithKeyPg(client, params);
 }
 
 export async function createApiKeyWithAudit(

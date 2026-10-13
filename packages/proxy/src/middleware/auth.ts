@@ -1,9 +1,10 @@
 /**
- * 用户 API 鉴权中间件：从多种客户端约定位置提取 sk，校验后写入 `c.set('apiKey', …)`。
+ * 用户鉴权：兼容 API Key，以及可选的 Authorization Bearer JWT。
  * 预算在「大部分路由」上于此拦截；`/v1/chat/completions` 等在具体路由内结合模型 free 通道再判断。
  */
 import { createMiddleware } from 'hono/factory';
 import { authenticateApiKey } from '../services/api-key-auth';
+import { authenticateJwt, JwtAuthError } from '../services/jwt-auth';
 import type { Env } from '../app';
 import { GatewayErrorCode } from '../services/gateway-error-codes';
 import { gatewayErrorJson } from '../services/gateway-error-response';
@@ -56,12 +57,6 @@ export function isAnthropicMessagesPath(path: string): boolean {
     path === '/v1/v1/messages' ||
     path.startsWith('/v1/v1/messages/')
   );
-}
-
-/** 日志中脱敏展示密钥前缀。 */
-function maskKey(key: string): string {
-  if (key.length <= 12) return '***';
-  return `${key.slice(0, 8)}...${key.slice(-4)}`;
 }
 
 /**
@@ -149,9 +144,29 @@ export const requireApiKey = createMiddleware<Env>(async (c, next) => {
   }
 
   const repos = c.get('repositories');
-  const authResult = await authenticateApiKey(repos, key);
+  // JWTs are accepted only via Authorization, never URLs or API-key SDK headers.
+  const isJwt = !key.startsWith('sk-') && key.includes('.');
+  let authResult;
+  try {
+    if (isJwt) {
+      if (!c.env?.JWT_AUTH_CONFIG || c.req.header('Authorization')?.trim() !== `Bearer ${key}`) {
+        throw new JwtAuthError(401, 'Invalid access token');
+      }
+      authResult = await authenticateJwt(repos, key, c.env.JWT_AUTH_CONFIG);
+    } else {
+      authResult = await authenticateApiKey(repos, key);
+    }
+  } catch (error) {
+    if (!(error instanceof JwtAuthError)) throw error;
+    return gatewayErrorJson(c, {
+      status: error.status,
+      code: error.status === 503 ? GatewayErrorCode.authUnavailable : GatewayErrorCode.authFailed,
+      message: error.message,
+      headers: error.status === 401 ? { 'WWW-Authenticate': 'Bearer error="invalid_token"' } : undefined,
+    });
+  }
   if (!authResult) {
-    console.warn(`[Gateway Auth] 401 API key not found keyPrefix=${maskKey(key)}`);
+    console.warn('[Gateway Auth] 401 invalid credential');
     return gatewayErrorJson(c, {
       status: 401,
       code: GatewayErrorCode.authFailed,

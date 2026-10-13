@@ -2,6 +2,7 @@
  * D1：关键写路径（batch / 原始 SQL），供 `storage/critical-write-paths` 调度。
  */
 import type { D1PreparedStatement } from '@cloudflare/workers-types';
+import type { CreateUserWithKeyParams } from '../user-with-key-types';
 import { eq } from 'drizzle-orm';
 import type { InsertUserAuditLogParams } from '../user-audit-logs-types';
 import type { InsertUserBudgetAuditLogParams } from '../user-budget-audit-params';
@@ -69,6 +70,22 @@ export async function getSystemConfigValueD1(client: D1DatabaseClient, key: stri
 		.where(eq(d1SystemConfigTable.key, key))
 		.limit(1);
 	return row[0]?.value ?? null;
+}
+
+/** D1 batch rolls back the entire provisioning operation on a uniqueness conflict. */
+export async function createUserWithKeyD1(client: D1DatabaseClient, params: CreateUserWithKeyParams): Promise<void> {
+	const u = params.user;
+	await ensureD1Batch(client, [
+		client.raw.prepare(`INSERT INTO users
+			(id, email, external_system, external_user_id, budget_max, budget_base, budget_spent,
+			budget_period, budget_reset_at, wallet_granted, wallet_spent, status, metadata, charged_cost_factors, rate_limit)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+			.bind(u.id, u.email, u.external_system, u.external_user_id, u.budget_max, u.budget_base, u.budget_spent,
+				u.budget_period, u.budget_reset_at, u.wallet_granted, u.wallet_spent, u.status, u.metadata,
+				u.charged_cost_factors, u.rate_limit == null ? null : JSON.stringify(u.rate_limit)),
+		buildInsertApiKeyStatement(client.raw, params.key),
+		...params.audits.map((audit) => buildInsertUserAuditLogStatement(client.raw, audit)),
+	]);
 }
 
 export async function createApiKeyWithAuditD1(
